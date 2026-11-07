@@ -1,0 +1,9 @@
+name: body_bridge
+version: "0.1.0"
+description: "Forward Hermes agent events to coupling-body Agent Channel for reflexd"
+author: "Erika"
+provides_hooks:
+  - post_gateway_admission
+  - post_llm_call
+provides_middleware:
+  - llm_execution
