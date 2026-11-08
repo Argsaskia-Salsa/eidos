@@ -1,4 +1,4 @@
-"""Body Bridge Plugin — forwards Hermes events to coupling-body Agent Channel.
+"""Body Bridge Plugin — forwards Hermes events to reflexd via MCP.
 
 Hooks:
 - post_gateway_admission → user_message (after auth/admission, inside session slot)
@@ -7,12 +7,13 @@ Hooks:
 Middleware:
 - LLM_EXECUTION_MIDDLEWARE → thinking_start / thinking_end (at exact LLM generation boundaries)
 
-Posts to Agent Channel (http://localhost:8769/messages) for reflexd consumption.
+Posts to reflexd MCP (http://localhost:8770/mcp) for reflexd consumption.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 from typing import Any
@@ -22,7 +23,7 @@ import httpx
 logger = logging.getLogger("hermes.plugins.body_bridge")
 logger.info("Body Bridge plugin module loaded")
 
-AGENT_CHANNEL_URL = "http://localhost:8769/messages"
+REFLEXD_MCP_URL = "http://localhost:8770/mcp"
 
 # ─── Dedicated worker thread with its own event loop ───
 # The llm_execution middleware is *synchronous* and may run on a thread
@@ -84,33 +85,48 @@ def _schedule_post(
     chat_id: str,
     user_id: str,
 ) -> None:
-    """Schedule a fire-and-forget POST to Agent Channel (thread-safe)."""
+    """Schedule a fire-and-forget POST to reflexd MCP (thread-safe)."""
+    logger.info("body_bridge: _schedule_post called: event_type=%s, platform=%s, chat_id=%s", event_type, platform, chat_id)
     # Guard: platform may be None.
     platform_norm = (platform or "").lower()
     if platform_norm in ("local", "desktop", "cli"):
+        logger.info("body_bridge: skipping local platform: %s", platform_norm)
         return
 
     payload = {
-        "type": event_type,
-        "source": "hermes",
-        "payload": {
+        "name": event_type,
+        "data": {
             "text": text or "",
             "platform": platform or "unknown",
             "chat_id": chat_id,
             "user_id": user_id,
         },
+        "type": "inject",
     }
 
     async def _post() -> None:
         try:
             async with httpx.AsyncClient(timeout=1.0) as client:
-                response = await client.post(AGENT_CHANNEL_URL, json=payload)
+                response = await client.post(
+                    REFLEXD_MCP_URL,
+                    json={
+                        "jsonrpc": "2.0",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "inject_event",
+                            "arguments": payload,
+                        },
+                        "id": 1,
+                    },
+                )
                 if response.status_code >= 400:
                     logger.warning(
                         "body_bridge: POST %s -> HTTP %s",
                         event_type,
                         response.status_code,
                     )
+                else:
+                    logger.info("body_bridge: POST %s -> HTTP %s", event_type, response.status_code)
         except Exception as e:
             # Failures used to be silent (debug). Surface them.
             logger.warning("body_bridge: POST %s failed: %s", event_type, e)
@@ -145,6 +161,7 @@ async def _post_gateway_admission_hook(
     Perfect point for user_message — message is validated and has a session.
     Returns (consumed, reply). consumed=False to let message continue.
     """
+    logger.info("body_bridge: post_gateway_admission called: session_key=%s, platform=%s, text=%s", session_key, platform, text[:50] if text else "")
     if not text or not text.strip():
         logger.debug("body_bridge: post_gateway_admission empty text, skipping")
         return False, None
@@ -183,6 +200,7 @@ async def _post_llm_call_hook(
     (consumed, reply) tuple here, change the return accordingly and
     verify against the framework version.
     """
+    logger.info("body_bridge: post_llm_call called: session_id=%s, platform=%s", session_id, platform)
     if not assistant_response or not assistant_response.strip():
         logger.debug("body_bridge: post_llm_call empty response, skipping")
         return None
@@ -221,6 +239,7 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
     Fires thinking_start BEFORE calling next_call (the actual LLM),
     fires thinking_end AFTER next_call returns.
     """
+    logger.info("body_bridge: llm_execution middleware called: session_id=%s, platform=%s", kwargs.get("session_id"), kwargs.get("platform"))
     request = kwargs.get("request", {})
     next_call = kwargs.get("next_call")
     if next_call is None:
@@ -238,6 +257,7 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
 
     # THINKING START — dispatched via the worker loop so it does not get
     # blocked behind the synchronous next_call() below.
+    logger.info("body_bridge: firing thinking_start")
     _schedule_post(
         "thinking_start",
         text="",
@@ -250,6 +270,7 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
         return next_call(request)
     finally:
         # THINKING END
+        logger.info("body_bridge: firing thinking_end")
         _schedule_post(
             "thinking_end",
             text="",
