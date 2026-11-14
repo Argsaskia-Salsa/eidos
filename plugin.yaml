@@ -1,5 +1,5 @@
 name: body_bridge
-version: "0.1.0"
+version: "0.2.0"
 description: "Forward Hermes agent events to coupling-body Agent Channel for reflexd"
 author: "Erika"
 provides_hooks:
@@ -7,3 +7,12 @@ provides_hooks:
   - post_llm_call
 provides_middleware:
   - llm_execution
+config:
+  REFLEXD_MCP_URL:
+    type: string
+    default: "http://localhost:8770/mcp"
+    description: "reflexd MCP endpoint URL"
+  REFLEXD_TIMEOUT_SECONDS:
+    type: number
+    default: 1.0
+    description: "HTTP request timeout in seconds"

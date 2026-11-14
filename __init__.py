@@ -8,13 +8,17 @@ Middleware:
 - LLM_EXECUTION_MIDDLEWARE → thinking_start / thinking_end (at exact LLM generation boundaries)
 
 Posts to reflexd MCP (http://localhost:8770/mcp) for reflexd consumption.
+
+Configuration:
+- REFLEXD_MCP_URL environment variable (default: http://localhost:8770/mcp)
+- REFLEXD_TIMEOUT_SECONDS environment variable (default: 1.0)
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
+import os
 import threading
 from typing import Any
 
@@ -23,77 +27,31 @@ import httpx
 logger = logging.getLogger("hermes.plugins.body_bridge")
 logger.info("Body Bridge plugin module loaded")
 
-REFLEXD_MCP_URL = "http://localhost:8770/mcp"
+DEFAULT_MCP_URL = "http://localhost:8770/mcp"
+DEFAULT_TIMEOUT = 1.0
 
-# ─── Dedicated worker thread with its own event loop ───
-# The llm_execution middleware is *synchronous* and may run on a thread
-# without a running loop, or on the loop thread while next_call() blocks.
-# A dedicated worker loop makes _schedule_post safe from any thread and
-# ensures thinking_start is dispatched immediately, not blocked behind
-# the actual LLM generation.
-_worker_loop: asyncio.AbstractEventLoop | None = None
-_worker_thread: threading.Thread | None = None
-_worker_ready = threading.Event()
-_worker_lock = threading.Lock()
+_REFLEXD_MCP_URL = os.getenv("REFLEXD_MCP_URL", DEFAULT_MCP_URL)
+_REFLEXD_TIMEOUT = float(os.getenv("REFLEXD_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT)))
 
-# Keep references to in-flight futures so they aren't GC'd mid-flight.
-_pending_futures: set = set()
-_pending_lock = threading.Lock()
+_LOCAL_PLATFORMS: frozenset[str] = frozenset({"local", "desktop", "cli"})
 
 
-def _ensure_worker() -> asyncio.AbstractEventLoop | None:
-    """Start (or restart) the worker loop. Returns the loop, or None on failure."""
-    global _worker_loop, _worker_thread
-    if _worker_loop is not None and _worker_loop.is_running():
-        return _worker_loop
-
-    with _worker_lock:
-        if _worker_loop is not None and _worker_loop.is_running():
-            return _worker_loop
-        _worker_ready.clear()
-
-        def _run() -> None:
-            global _worker_loop
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            _worker_loop = loop
-            _worker_ready.set()
-            try:
-                loop.run_forever()
-            finally:
-                loop.close()
-
-        _worker_thread = threading.Thread(
-            target=_run, daemon=True, name="body-bridge-worker"
-        )
-        _worker_thread.start()
-        if not _worker_ready.wait(timeout=5.0):
-            logger.warning("body_bridge: worker loop did not become ready")
-            return None
-        return _worker_loop
+def _is_local_platform(platform: str | None) -> bool:
+    """Check if platform should be skipped (local development platforms)."""
+    if platform is None:
+        return False
+    return platform.lower() in _LOCAL_PLATFORMS
 
 
-def _cleanup_future(fut) -> None:
-    with _pending_lock:
-        _pending_futures.discard(fut)
-
-
-def _schedule_post(
+def _build_payload(
     event_type: str,
-    text: str,
+    text: str | None,
     platform: str,
     chat_id: str,
     user_id: str,
-) -> None:
-    """Schedule a fire-and-forget POST to reflexd MCP (thread-safe)."""
-    logger.info("body_bridge: _schedule_post called: event_type=%s, platform=%s, chat_id=%s", event_type, platform, chat_id)
-    # Guard: platform may be None.
-    platform_norm = (platform or "").lower()
-    if platform_norm in ("local", "desktop", "cli"):
-        logger.info("body_bridge: skipping local platform: %s", platform_norm)
-        return
-
-    payload = {
+) -> dict[str, Any]:
+    """Build the payload for reflexd inject_event."""
+    return {
         "name": event_type,
         "data": {
             "text": text or "",
@@ -104,11 +62,93 @@ def _schedule_post(
         "type": "inject",
     }
 
-    async def _post() -> None:
+
+def _extract_chat_user_from_history(
+    conversation_history: list[dict[str, Any]] | None,
+    session_id: str | None = None,
+) -> tuple[str, str]:
+    """Extract chat_id and user_id from the last user message in history."""
+    chat_id = "unknown"
+    user_id = "unknown"
+
+    for msg in reversed(conversation_history or []):
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "user":
+            continue
+        meta = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
+        chat_id = str(msg.get("chat_id") or meta.get("chat_id") or session_id or "unknown")
+        user_id = str(msg.get("user_id") or meta.get("user_id") or "unknown")
+        break
+
+    return chat_id, user_id
+
+
+class EventDispatcher:
+    """Encapsulates the worker loop and event posting to reflexd."""
+
+    def __init__(
+        self,
+        mcp_url: str = _REFLEXD_MCP_URL,
+        timeout: float = _REFLEXD_TIMEOUT,
+    ) -> None:
+        self._mcp_url = mcp_url
+        self._timeout = timeout
+        self._worker_loop: asyncio.AbstractEventLoop | None = None
+        self._worker_thread: threading.Thread | None = None
+        self._worker_ready = threading.Event()
+        self._worker_lock = threading.Lock()
+        self._pending_futures: set[asyncio.Future[Any]] = set()
+        self._pending_lock = threading.Lock()
+
+    def _ensure_worker(self) -> asyncio.AbstractEventLoop | None:
+        """Start (or restart) the worker loop. Returns the loop, or None on failure."""
+        if self._worker_loop is not None and self._worker_loop.is_running():
+            return self._worker_loop
+
+        with self._worker_lock:
+            if self._worker_loop is not None and self._worker_loop.is_running():
+                return self._worker_loop
+            self._worker_ready.clear()
+
+            def _run() -> None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                self._worker_loop = loop
+                self._worker_ready.set()
+                try:
+                    loop.run_forever()
+                finally:
+                    loop.close()
+
+            self._worker_thread = threading.Thread(
+                target=_run, daemon=True, name="body-bridge-worker"
+            )
+            self._worker_thread.start()
+            if not self._worker_ready.wait(timeout=5.0):
+                logger.warning("body_bridge: worker loop did not become ready")
+                return None
+            return self._worker_loop
+
+    def _cleanup_future(self, fut: asyncio.Future[Any]) -> None:
+        with self._pending_lock:
+            self._pending_futures.discard(fut)
+
+    async def _post_to_reflexd(
+        self,
+        event_type: str,
+        text: str | None,
+        platform: str,
+        chat_id: str,
+        user_id: str,
+    ) -> None:
+        """Send a single event to reflexd MCP endpoint."""
+        payload = _build_payload(event_type, text, platform, chat_id, user_id)
+
         try:
-            async with httpx.AsyncClient(timeout=1.0) as client:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(
-                    REFLEXD_MCP_URL,
+                    self._mcp_url,
                     json={
                         "jsonrpc": "2.0",
                         "method": "tools/call",
@@ -128,31 +168,65 @@ def _schedule_post(
                 else:
                     logger.info("body_bridge: POST %s -> HTTP %s", event_type, response.status_code)
         except Exception as e:
-            # Failures used to be silent (debug). Surface them.
             logger.warning("body_bridge: POST %s failed: %s", event_type, e)
 
-    loop = _ensure_worker()
-    if loop is None:
-        logger.warning(
-            "body_bridge: worker loop unavailable, dropping %s event", event_type
+    def schedule_post(
+        self,
+        event_type: str,
+        text: str | None,
+        platform: str,
+        chat_id: str,
+        user_id: str,
+    ) -> None:
+        """Schedule a fire-and-forget POST to reflexd MCP (thread-safe)."""
+        logger.info(
+            "body_bridge: schedule_post called: event_type=%s, platform=%s, chat_id=%s",
+            event_type,
+            platform,
+            chat_id,
         )
-        return
 
-    try:
-        fut = asyncio.run_coroutine_threadsafe(_post(), loop)
-    except Exception as e:
-        logger.warning("body_bridge: failed to schedule %s: %s", event_type, e)
-        return
+        if _is_local_platform(platform):
+            logger.info("body_bridge: skipping local platform: %s", (platform or "").lower())
+            return
 
-    with _pending_lock:
-        _pending_futures.add(fut)
-    fut.add_done_callback(_cleanup_future)
+        loop = self._ensure_worker()
+        if loop is None:
+            logger.warning("body_bridge: worker loop unavailable, dropping %s event", event_type)
+            return
+
+        async def _post() -> None:
+            await self._post_to_reflexd(event_type, text, platform, chat_id, user_id)
+
+        try:
+            fut = asyncio.run_coroutine_threadsafe(_post(), loop)
+        except Exception as e:
+            logger.warning("body_bridge: failed to schedule %s: %s", event_type, e)
+            return
+
+        with self._pending_lock:
+            self._pending_futures.add(fut)
+        fut.add_done_callback(self._cleanup_future)
+
+
+_dispatcher = EventDispatcher()
+
+
+def _schedule_post(
+    event_type: str,
+    text: str | None,
+    platform: str,
+    chat_id: str,
+    user_id: str,
+) -> None:
+    """Backward-compatible wrapper for existing hook/middleware code."""
+    _dispatcher.schedule_post(event_type, text, platform, chat_id, user_id)
 
 
 async def _post_gateway_admission_hook(
     session_key: str,
     platform: str,
-    source: dict,
+    source: dict[str, Any],
     message_id: str,
     text: str,
 ) -> tuple[bool, Any]:
@@ -161,12 +235,17 @@ async def _post_gateway_admission_hook(
     Perfect point for user_message — message is validated and has a session.
     Returns (consumed, reply). consumed=False to let message continue.
     """
-    logger.info("body_bridge: post_gateway_admission called: session_key=%s, platform=%s, text=%s", session_key, platform, text[:50] if text else "")
+    text_preview = text[:50] if text else ""
+    logger.info(
+        "body_bridge: post_gateway_admission called: session_key=%s, platform=%s, text=%s",
+        session_key,
+        platform,
+        text_preview,
+    )
     if not text or not text.strip():
         logger.debug("body_bridge: post_gateway_admission empty text, skipping")
         return False, None
 
-    # Guard: source may be None or not a dict.
     src = source if isinstance(source, dict) else {}
     chat_id = str(src.get("chat_id") or "unknown")
     user_id = str(src.get("user_id") or "unknown")
@@ -180,7 +259,7 @@ async def _post_gateway_admission_hook(
         user_id=user_id,
     )
 
-    return False, None  # False = not consumed, let it continue
+    return False, None
 
 
 async def _post_llm_call_hook(
@@ -189,7 +268,7 @@ async def _post_llm_call_hook(
     turn_id: str,
     user_message: str,
     assistant_response: str,
-    conversation_history: list,
+    conversation_history: list[dict[str, Any]],
     model: str,
     platform: str,
     side_question_token: Any = None,
@@ -200,25 +279,16 @@ async def _post_llm_call_hook(
     (consumed, reply) tuple here, change the return accordingly and
     verify against the framework version.
     """
-    logger.info("body_bridge: post_llm_call called: session_id=%s, platform=%s", session_id, platform)
+    logger.info(
+        "body_bridge: post_llm_call called: session_id=%s, platform=%s",
+        session_id,
+        platform,
+    )
     if not assistant_response or not assistant_response.strip():
         logger.debug("body_bridge: post_llm_call empty response, skipping")
         return None
 
-    # Best-effort extraction of chat/user identity from the last user message.
-    chat_id = "unknown"
-    user_id = "unknown"
-    for msg in reversed(conversation_history or []):
-        if not isinstance(msg, dict):
-            continue
-        if msg.get("role") != "user":
-            continue
-        meta = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
-        chat_id = str(
-            msg.get("chat_id") or meta.get("chat_id") or session_id or "unknown"
-        )
-        user_id = str(msg.get("user_id") or meta.get("user_id") or "unknown")
-        break
+    chat_id, user_id = _extract_chat_user_from_history(conversation_history, session_id)
 
     _schedule_post(
         "user_response",
@@ -239,24 +309,25 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
     Fires thinking_start BEFORE calling next_call (the actual LLM),
     fires thinking_end AFTER next_call returns.
     """
-    logger.info("body_bridge: llm_execution middleware called: session_id=%s, platform=%s", kwargs.get("session_id"), kwargs.get("platform"))
+    logger.info(
+        "body_bridge: llm_execution middleware called: session_id=%s, platform=%s",
+        kwargs.get("session_id"),
+        kwargs.get("platform"),
+    )
     request = kwargs.get("request", {})
     next_call = kwargs.get("next_call")
     if next_call is None:
-        # No downstream to call — bail out without emitting events.
         return request
 
     session_id = str(kwargs.get("session_id") or "")
     platform = str(kwargs.get("platform") or "")
 
-    if platform.lower() in ("local", "desktop", "cli"):
+    if _is_local_platform(platform):
         return next_call(request)
 
     chat_id = str(kwargs.get("chat_id") or session_id or "unknown")
     user_id = str(kwargs.get("user_id") or "unknown")
 
-    # THINKING START — dispatched via the worker loop so it does not get
-    # blocked behind the synchronous next_call() below.
     logger.info("body_bridge: firing thinking_start")
     _schedule_post(
         "thinking_start",
@@ -269,7 +340,6 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
     try:
         return next_call(request)
     finally:
-        # THINKING END
         logger.info("body_bridge: firing thinking_end")
         _schedule_post(
             "thinking_end",
@@ -280,12 +350,11 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
         )
 
 
-def register(ctx) -> None:
+def register(ctx: Any) -> None:
     """Plugin entry point — called by Hermes on startup."""
     logger.info("Body Bridge plugin loaded: registering hooks and middleware")
 
-    # Bring up the background worker before any event can arrive.
-    _ensure_worker()
+    _dispatcher._ensure_worker()
 
     ctx.register_hook("post_gateway_admission", _post_gateway_admission_hook)
     ctx.register_hook("post_llm_call", _post_llm_call_hook)
