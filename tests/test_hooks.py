@@ -127,7 +127,7 @@ class TestStreamHooks:
             assert args["event_type"] == "stream_start"
             assert args["platform"] == "stream"
             assert args["chat_id"] == "sess-1"
-            assert args["user_id"] == ""
+            assert args["user_id"] == "unknown"
 
     @pytest.mark.asyncio
     async def test_on_stream_delta_buffers_until_threshold(self):
@@ -444,7 +444,7 @@ class TestSessionEndHook:
             assert args["event_type"] == "session_end"
             assert args["platform"] == "telegram"
             assert args["chat_id"] == "sess-1"
-            assert args["user_id"] == ""
+            assert args["user_id"] == "unknown"
 
     @pytest.mark.asyncio
     async def test_all_parameters_passed_through(self):
@@ -504,7 +504,7 @@ class TestSessionFinalizeHook:
             assert args["event_type"] == "session_finalize"
             assert args["platform"] == "telegram"
             assert args["chat_id"] == "sess-1"
-            assert args["user_id"] == ""
+            assert args["user_id"] == "unknown"
 
     @pytest.mark.asyncio
     async def test_session_boundary_reason(self):
@@ -880,6 +880,177 @@ class TestStreamThrottlingLogic:
             assert mock_create_task.call_count == 2
             assert "sess-a" in bb._stream_timers
             assert "sess-b" in bb._stream_timers
+
+
+class TestStreamBufferTTL:
+    """Test stream buffer TTL sweep."""
+
+    @pytest.mark.asyncio
+    async def test_session_end_flushes_buffer(self):
+        """on_session_end flushes stream buffer."""
+        with patch.object(bb, "_schedule_post") as mock_schedule:
+            bb._stream_buffer["sess-ttl-1"] = ["buffered ", "text"]
+
+            await bb._on_session_end_hook(
+                session_id="sess-ttl-1",
+                completed=True,
+                interrupted=False,
+                model="gpt-4",
+                platform="telegram",
+                reason="turn_complete",
+                task_id="task-1",
+                turn_id="turn-1",
+                api_request_id="api-1",
+            )
+
+            # Should flush buffer (stream_delta) then send session_end
+            assert mock_schedule.call_count == 2
+            args1 = _get_schedule_args(mock_schedule, 0)
+            args2 = _get_schedule_args(mock_schedule, 1)
+            assert args1["event_type"] == "stream_delta"
+            assert args1["text"] == "buffered text"
+            assert args2["event_type"] == "session_end"
+            assert "sess-ttl-1" not in bb._stream_buffer
+
+    @pytest.mark.asyncio
+    async def test_session_finalize_flushes_buffer(self):
+        """on_session_finalize flushes stream buffer."""
+        with patch.object(bb, "_schedule_post") as mock_schedule:
+            bb._stream_buffer["sess-ttl-2"] = ["buffered ", "text"]
+
+            await bb._on_session_finalize_hook(
+                session_id="sess-ttl-2",
+                platform="telegram",
+                reason="new_session",
+            )
+
+            # Should flush buffer (stream_delta) then send session_finalize
+            assert mock_schedule.call_count == 2
+            args1 = _get_schedule_args(mock_schedule, 0)
+            args2 = _get_schedule_args(mock_schedule, 1)
+            assert args1["event_type"] == "stream_delta"
+            assert args1["text"] == "buffered text"
+            assert args2["event_type"] == "session_finalize"
+            assert "sess-ttl-2" not in bb._stream_buffer
+
+
+class TestTimerCancellation:
+    """Test timer cancellation in _flush_stream_buffer."""
+
+    @pytest.mark.asyncio
+    async def test_flush_cancels_pending_timer(self):
+        """_flush_stream_buffer cancels timer before popping."""
+        with patch.object(bb, "_schedule_post") as mock_schedule:
+            bb._stream_buffer["sess-timer-1"] = ["test"]
+            mock_timer = MagicMock()
+            mock_timer.done.return_value = False
+            bb._stream_timers["sess-timer-1"] = mock_timer
+
+            await bb._flush_stream_buffer("sess-timer-1")
+
+            mock_timer.cancel.assert_called_once()
+            mock_schedule.assert_called_once()
+            assert "sess-timer-1" not in bb._stream_timers
+
+    @pytest.mark.asyncio
+    async def test_flush_does_not_cancel_done_timer(self):
+        """_flush_stream_buffer does not cancel already-done timer."""
+        with patch.object(bb, "_schedule_post") as mock_schedule:
+            bb._stream_buffer["sess-timer-2"] = ["test"]
+            mock_timer = MagicMock()
+            mock_timer.done.return_value = True
+            bb._stream_timers["sess-timer-2"] = mock_timer
+
+            await bb._flush_stream_buffer("sess-timer-2")
+
+            mock_timer.cancel.assert_not_called()
+            mock_schedule.assert_called_once()
+
+
+class TestO1BufferLength:
+    """Test O(1) buffer length tracking."""
+
+    @pytest.mark.asyncio
+    async def test_stream_lengths_accumulates(self):
+        """_stream_lengths tracks accumulated length."""
+        bb._stream_buffer.clear()
+        bb._stream_lengths.clear()
+        bb._stream_timers.clear()
+
+        timer_coro = None
+
+        def capture_coro(coro):
+            nonlocal timer_coro
+            timer_coro = coro
+            mock_timer = MagicMock()
+            return mock_timer
+
+        with (
+            patch.object(bb, "_schedule_post"),
+            patch("asyncio.create_task") as mock_create_task,
+        ):
+            mock_create_task.side_effect = capture_coro
+
+            await bb._on_stream_delta_hook(
+                session_id="sess-len-1",
+                turn_id="turn-1",
+                iteration=1,
+                model="gpt-4",
+                provider="openai",
+                surface="chat",
+                delta="Hello ",
+                kind="text",
+            )
+            await bb._on_stream_delta_hook(
+                session_id="sess-len-1",
+                turn_id="turn-1",
+                iteration=1,
+                model="gpt-4",
+                provider="openai",
+                surface="chat",
+                delta="World",
+                kind="text",
+            )
+
+            assert bb._stream_lengths["sess-len-1"] == 11  # "Hello " + "World" = 11
+            if timer_coro:
+                timer_coro.close()
+
+    @pytest.mark.asyncio
+    async def test_stream_lengths_cleared_on_flush(self):
+        """_stream_lengths cleared when buffer flushed."""
+        bb._stream_buffer.clear()
+        bb._stream_lengths.clear()
+        bb._stream_timers.clear()
+
+        with patch.object(bb, "_schedule_post") as mock_schedule:
+            bb._stream_buffer["sess-len-2"] = ["Hello ", "World"]
+            bb._stream_lengths["sess-len-2"] = 11
+
+            await bb._flush_stream_buffer("sess-len-2")
+
+            assert "sess-len-2" not in bb._stream_lengths
+            mock_schedule.assert_called_once()
+
+
+class TestShutdownThreadJoin:
+    """Test shutdown joins worker thread."""
+
+    def test_shutdown_joins_thread(self):
+        """shutdown() joins worker thread with timeout."""
+        dispatcher = bb.EventDispatcher()
+        dispatcher._ensure_worker()
+
+        # Verify thread is alive
+        assert dispatcher._worker_thread is not None
+        assert dispatcher._worker_thread.is_alive()
+
+        # Shutdown should join the thread
+        dispatcher.shutdown()
+
+        # Thread should be stopped
+        assert dispatcher._worker_thread is None or not dispatcher._worker_thread.is_alive()
+        assert dispatcher._worker_loop is None
 
 
 # Clean up global state after each test

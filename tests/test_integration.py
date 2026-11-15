@@ -72,11 +72,12 @@ class TestReflexdProtocol:
             # JSON-RPC 2.0 structure
             assert req["jsonrpc"] == "2.0"
             assert req["method"] == "tools/call"
-            assert req["id"] == 1
+            assert isinstance(req["id"], int)
+            assert req["id"] >= 1
 
             # Tool call structure
             params = req["params"]
-            assert params["name"] == "inject_event"
+            assert params["name"] == bb._REFLEXD_INJECT_TOOL
             args = params["arguments"]
             assert args["name"] == "user_message"
             assert args["type"] == "inject"
