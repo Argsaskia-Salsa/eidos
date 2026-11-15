@@ -1,9 +1,9 @@
-"""Integration tests for body_bridge new hooks - end-to-end flow verification."""
+"""Integration tests for body_expression_bridge new hooks - end-to-end flow verification."""
 
 import threading
 from unittest.mock import MagicMock, patch
 
-import body_bridge as bb
+import body_expression_bridge as bb
 import pytest
 from aiohttp import web
 

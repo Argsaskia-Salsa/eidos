@@ -1,4 +1,4 @@
-# Workflow Rules for body_bridge Changes
+# Workflow Rules for body_expression_bridge Changes
 
 ## Core Principle
 **Successful change = all tests pass + linter clean + coverage maintained**
@@ -7,7 +7,7 @@
 
 ## 1. Testing (before changes)
 - [ ] Run existing tests: `pytest tests/ -v`
-- [ ] Check coverage: `pytest --cov=body_bridge --cov-report=term-missing`
+- [ ] Check coverage: `pytest --cov=body_expression_bridge --cov-report=term-missing`
 - [ ] Record baseline: test count, coverage %, warnings
 
 ## 2. Writing Tests (for new functionality)
@@ -36,7 +36,7 @@
 - [ ] Ignores only for tests: `S101`, `T201`
 
 ## 6. Code Coverage
-- [ ] `pytest --cov=body_bridge --cov-report=term-missing`
+- [ ] `pytest --cov=body_expression_bridge --cov-report=term-missing`
 - [ ] Coverage must not drop below current (79%)
 - [ ] New code must have tests
 - [ ] Document untestable paths (worker thread startup, exception paths)
@@ -52,7 +52,7 @@
 ## 8. Final Check (Definition of Done)
 - [ ] `pytest tests/ -v` — **37 passed** (or more)
 - [ ] `ruff check .` — **All checks passed**
-- [ ] `pytest --cov=body_bridge` — **≥ 79%**
+- [ ] `pytest --cov=body_expression_bridge` — **≥ 79%**
 - [ ] No new deprecation warnings
 - [ ] README/plugin.yaml updated when config/API changes
 
@@ -61,11 +61,12 @@
 ## Quick Check Commands
 ```bash
 # Full cycle
-cd %HOME%\.hermes\plugins\body_bridge
-pytest tests/ -v && ruff check . && pytest --cov=body_bridge --cov-report=term-missing
+cd %HOME%\.hermes\plugins\body_expression_bridge
+pytest tests/ -v && ruff check . && pytest --cov=body_expression_bridge --cov-report=term-missing
 ```
 
 ## Change History
 | Date | Change | Tests | Coverage |
 |------|--------|-------|----------|
 | 2026-11-14 | Refactor: EventDispatcher, tests, linter | 37/37 | 79% |
+| 2026-11-15 | Rename: body_bridge → body_expression_bridge | 37/37 | 79% |

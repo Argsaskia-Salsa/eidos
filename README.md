@@ -1,10 +1,12 @@
-# body_bridge
+# body_expression_bridge
 
-Hermes plugin that forwards agent events to **reflexd** via MCP for real-time coupling-body Agent Channel consumption.
+Hermes plugin that forwards agent events to **reflexd** via MCP for real-time expressive-body reactions (animations, speech-gesture sync, attention cues).
 
 ## Overview
 
 The plugin bridges Hermes internal events to reflexd's Agent Channel by posting JSON-RPC calls to the reflexd MCP endpoint (`http://localhost:8770/mcp` by default). This enables reflexd to track and visualize the agent's thought process and communication flow in real time.
+
+**Outbound only**: This plugin does NOT register tools, does NOT read sensors, and does NOT touch motor control. For the inbound L0/L1 path see the separate `body_sensor_bridge` plugin.
 
 ## Events Forwarded
 
@@ -39,8 +41,8 @@ If you have the Hermes CLI installed, you can install and enable the plugin dire
 
 ```bash
 # Install from the plugin directory
-hermes plugins install body_bridge
-hermes plugins enable body_bridge
+hermes plugins install body_expression_bridge
+hermes plugins enable body_expression_bridge
 ```
 
 ### Method 2: Manual Installation (Directory-based)
@@ -50,28 +52,28 @@ Since this is a directory-based Hermes plugin (not a pip package), copy the plug
 **Linux/macOS:**
 ```bash
 # Copy the plugin directory to Hermes plugins folder
-cp -r body_bridge ~/.hermes/plugins/
+cp -r body_expression_bridge ~/.hermes/plugins/
 
 # Enable the plugin
-hermes plugins enable body_bridge
+hermes plugins enable body_expression_bridge
 ```
 
 **Windows (PowerShell):**
 ```powershell
 # Copy the plugin directory to Hermes plugins folder
-Copy-Item -Recurse body_bridge $env:USERPROFILE\.hermes\plugins\
+Copy-Item -Recurse body_expression_bridge $env:USERPROFILE\.hermes\plugins\
 
 # Enable the plugin
-hermes plugins enable body_bridge
+hermes plugins enable body_expression_bridge
 ```
 
 **Windows (Command Prompt):**
 ```cmd
 REM Copy the plugin directory to Hermes plugins folder
-xcopy /E /I body_bridge %USERPROFILE%\.hermes\plugins\body_bridge\
+xcopy /E /I body_expression_bridge %USERPROFILE%\.hermes\plugins\body_expression_bridge\
 
 REM Enable the plugin
-hermes plugins enable body_bridge
+hermes plugins enable body_expression_bridge
 ```
 
 ### Method 3: Custom Plugin Directory
@@ -80,8 +82,8 @@ If you use a custom plugin directory, set `HERMES_PLUGINS_DIR` and copy there:
 
 ```bash
 export HERMES_PLUGINS_DIR=/path/to/your/plugins
-cp -r body_bridge $HERMES_PLUGINS_DIR/
-hermes plugins enable body_bridge
+cp -r body_expression_bridge $HERMES_PLUGINS_DIR/
+hermes plugins enable body_expression_bridge
 ```
 
 ### Verify Installation
@@ -90,13 +92,13 @@ After installation, verify the plugin is loaded:
 
 ```bash
 hermes plugins list
-# Should show: body_bridge (enabled)
+# Should show: body_expression_bridge (enabled)
 ```
 
 Or check Hermes startup logs for:
 ```
-Body Bridge plugin loaded: registering hooks and middleware
-Body Bridge hooks/middleware registered: post_gateway_admission, post_llm_call, ...
+Body Expression Bridge plugin loaded: registering hooks and middleware
+Body Expression Bridge hooks/middleware registered: post_gateway_admission, post_llm_call, ...
 ```
 
 ## Configuration
@@ -111,7 +113,7 @@ Example:
 ```bash
 export REFLEXD_MCP_URL=http://reflexd:8770/mcp
 export REFLEXD_TIMEOUT_SECONDS=2.0
-hermes plugins enable body_bridge
+hermes plugins enable body_expression_bridge
 ```
 
 Ensure reflexd is running with MCP enabled:
@@ -232,7 +234,7 @@ pytest tests/test_unit.py -v
 pytest tests/test_integration.py -v
 
 # Coverage report
-pytest tests/ --cov=body_bridge --cov-report=term-missing
+pytest tests/ --cov=body_expression_bridge --cov-report=term-missing
 ```
 
 ### Linting

@@ -1,8 +1,8 @@
-"""Unit tests for body_bridge new hooks (8 hooks added in v0.2)."""
+"""Unit tests for body_expression_bridge new hooks (8 hooks added in v0.2)."""
 
 from unittest.mock import MagicMock, patch
 
-import body_bridge as bb
+import body_expression_bridge as bb
 import pytest
 
 pytestmark = pytest.mark.order(3)

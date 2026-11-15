@@ -1,10 +1,10 @@
-"""Tests for body_bridge plugin - covers current functionality before refactoring."""
+"""Tests for body_expression_bridge plugin - covers current functionality before refactoring."""
 
 import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import body_bridge as bb
+import body_expression_bridge as bb
 import httpx
 import pytest
 

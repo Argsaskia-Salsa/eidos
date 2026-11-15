@@ -1,4 +1,10 @@
-"""Body Bridge Plugin — forwards Hermes events to reflexd via MCP.
+"""Body Expression Bridge Plugin — forwards Hermes dialogue lifecycle events
+to reflexd via MCP for expressive-body reactions (animations, speech-gesture
+sync, attention cues).
+
+Outbound only: this plugin does NOT register tools, does NOT read sensors,
+and does NOT touch motor control. For the inbound L0/L1 path see the
+separate `body_sensor_bridge` plugin.
 
 Hooks:
 - post_gateway_admission → user_message (after auth/admission, inside session slot)
@@ -42,8 +48,15 @@ from typing import Any
 
 import httpx
 
-logger = logging.getLogger("hermes.plugins.body_bridge")
-logger.info("Body Bridge plugin module loaded")
+logger = logging.getLogger("hermes.plugins.body_expression_bridge")
+logger.info("Body Expression Bridge plugin module loaded")
+
+# Deprecated alias — remove after 2 releases.
+# Any code or tooling grepping for the old logger name still sees records,
+# but they are emitted through the new logger with WARNING floor.
+_legacy_logger = logging.getLogger("hermes.plugins.body_bridge")
+if _legacy_logger.handlers or _legacy_logger.level == logging.NOTSET:
+    _legacy_logger.setLevel(logging.WARNING)
 
 DEFAULT_MCP_URL = "http://localhost:8770/mcp"
 DEFAULT_TIMEOUT = 1.0
@@ -65,7 +78,9 @@ def _env_float(name: str, default: float) -> float:
     try:
         return float(raw)
     except ValueError:
-        logger.warning("body_bridge: invalid %s=%r, using default %s", name, raw, default)
+        logger.warning(
+            "body_expression_bridge: invalid %s=%r, using default %s", name, raw, default
+        )
         return default
 
 
@@ -77,7 +92,9 @@ def _env_int(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        logger.warning("body_bridge: invalid %s=%r, using default %s", name, raw, default)
+        logger.warning(
+            "body_expression_bridge: invalid %s=%r, using default %s", name, raw, default
+        )
         return default
 
 
@@ -240,16 +257,16 @@ class EventDispatcher:
                     loop.close()
 
             self._worker_thread = threading.Thread(
-                target=_run, daemon=True, name="body-bridge-worker"
+                target=_run, daemon=True, name="body-expression-bridge-worker"
             )
             self._worker_thread.start()
             if not self._worker_ready.wait(timeout=0.5):
                 logger.error(
-                    "body_bridge: worker loop did not become ready",
+                    "body_expression_bridge: worker loop did not become ready",
                     exc_info=self._worker_exc,
                 )
                 return None
-            logger.info("body_bridge: worker loop started")
+            logger.info("body_expression_bridge: worker loop started")
             return self._worker_loop
 
     def _cleanup_future(self, fut: ConcurrentFuture[Any]) -> None:
@@ -297,18 +314,18 @@ class EventDispatcher:
             )
             if response.status_code >= 400:
                 logger.warning(
-                    "body_bridge: POST %s -> HTTP %s",
+                    "body_expression_bridge: POST %s -> HTTP %s",
                     event_type,
                     response.status_code,
                 )
                 self._record_fail()
             else:
                 logger.debug(
-                    "body_bridge: POST %s -> HTTP %s", event_type, response.status_code
+                    "body_expression_bridge: POST %s -> HTTP %s", event_type, response.status_code
                 )
                 self._record_success()
         except Exception as e:
-            logger.warning("body_bridge: POST %s failed: %s", event_type, e)
+            logger.warning("body_expression_bridge: POST %s failed: %s", event_type, e)
             self._record_fail()
 
     def _record_success(self) -> None:
@@ -325,7 +342,7 @@ class EventDispatcher:
                 self._breaker_open = True
                 self._breaker_open_time = time.time()
                 logger.info(
-                    "body_bridge: circuit breaker OPEN after %d failures",
+                    "body_expression_bridge: circuit breaker OPEN after %d failures",
                     self._breaker_failures,
                 )
         with _metrics_lock:
@@ -338,7 +355,7 @@ class EventDispatcher:
                 return True
             # half-open after cooldown
             if time.time() - self._breaker_open_time >= _REFLEXD_BREAKER_COOLDOWN:
-                logger.info("body_bridge: circuit breaker HALF-OPEN, allowing probe")
+                logger.info("body_expression_bridge: circuit breaker HALF-OPEN, allowing probe")
                 return True
             return False
 
@@ -357,21 +374,21 @@ class EventDispatcher:
         norm_platform = (platform or "unknown").strip().lower()
 
         logger.debug(
-            "body_bridge: schedule_post called: event_type=%s, platform=%s, chat_id=%s",
+            "body_expression_bridge: schedule_post called: event_type=%s, platform=%s, chat_id=%s",
             event_type,
             norm_platform,
             chat_id,
         )
 
         if _is_local_platform(norm_platform):
-            logger.debug("body_bridge: skipping local platform: %s", norm_platform)
+            logger.debug("body_expression_bridge: skipping local platform: %s", norm_platform)
             with _metrics_lock:
                 _metrics["dropped_local"] += 1
             return
 
         if not self._check_breaker():
             logger.debug(
-                "body_bridge: circuit breaker open, dropping %s event", event_type
+                "body_expression_bridge: circuit breaker open, dropping %s event", event_type
             )
             with _metrics_lock:
                 _metrics["dropped_breaker"] += 1
@@ -379,7 +396,9 @@ class EventDispatcher:
 
         loop = self._ensure_worker()
         if loop is None:
-            logger.warning("body_bridge: worker loop unavailable, dropping %s event", event_type)
+            logger.warning(
+                "body_expression_bridge: worker loop unavailable, dropping %s event", event_type
+            )
             return
 
         async def _post() -> None:
@@ -390,7 +409,7 @@ class EventDispatcher:
         try:
             fut = asyncio.run_coroutine_threadsafe(_post(), loop)
         except Exception as e:
-            logger.warning("body_bridge: failed to schedule %s: %s", event_type, e)
+            logger.warning("body_expression_bridge: failed to schedule %s: %s", event_type, e)
             return
 
         with self._pending_lock:
@@ -405,7 +424,7 @@ class EventDispatcher:
                         now - self._last_pending_warn >= 10
                     ):
                         logger.warning(
-                            "body_bridge: pending queue full (%d), dropped oldest",
+                            "body_expression_bridge: pending queue full (%d), dropped oldest",
                             _REFLEXD_MAX_PENDING
                         )
                         self._last_pending_warn = now
@@ -429,8 +448,8 @@ class EventDispatcher:
         if loop is not None and self._worker_thread is not None and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=2.0)
             if self._worker_thread.is_alive():
-                logger.warning("body_bridge: worker thread did not stop within timeout")
-        logger.info("body_bridge: worker loop stopped")
+                logger.warning("body_expression_bridge: worker thread did not stop within timeout")
+        logger.info("body_expression_bridge: worker loop stopped")
 
         # cancel pending futures
         with self._pending_lock:
@@ -449,7 +468,7 @@ class EventDispatcher:
         with _metrics_lock:
             if _metrics:
                 logger.info(
-                    "body_bridge: metrics scheduled=%d sent_ok=%d sent_fail=%d "
+                    "body_expression_bridge: metrics scheduled=%d sent_ok=%d sent_fail=%d "
                     "dropped_pending=%d dropped_breaker=%d dropped_local=%d",
                     _metrics["scheduled"],
                     _metrics["sent_ok"],
@@ -493,13 +512,14 @@ async def _post_gateway_admission_hook(
     """
     text_preview = text[:50] if text else ""
     logger.debug(
-        "body_bridge: post_gateway_admission called: session_key=%s, platform=%s, text=%s",
+        "body_expression_bridge: post_gateway_admission called: "
+        "session_key=%s, platform=%s, text=%s",
         session_key,
         platform,
         text_preview,
     )
     if not text or not text.strip():
-        logger.debug("body_bridge: post_gateway_admission empty text, skipping")
+        logger.debug("body_expression_bridge: post_gateway_admission empty text, skipping")
         return False, None
 
     src = source if isinstance(source, dict) else {}
@@ -536,12 +556,12 @@ async def _post_llm_call_hook(
     Returns (consumed, reply) to match hook contract across Hermes builds.
     """
     logger.debug(
-        "body_bridge: post_llm_call called: session_id=%s, platform=%s",
+        "body_expression_bridge: post_llm_call called: session_id=%s, platform=%s",
         session_id,
         platform,
     )
     if not assistant_response or not assistant_response.strip():
-        logger.debug("body_bridge: post_llm_call empty response, skipping")
+        logger.debug("body_expression_bridge: post_llm_call empty response, skipping")
         return False, None
 
     chat_id, user_id = _extract_chat_user_from_history(conversation_history, session_id)
@@ -568,7 +588,7 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
     fires thinking_end AFTER next_call returns.
     """
     logger.debug(
-        "body_bridge: llm_execution middleware called: session_id=%s, platform=%s",
+        "body_expression_bridge: llm_execution middleware called: session_id=%s, platform=%s",
         kwargs.get("session_id"),
         kwargs.get("platform"),
     )
@@ -586,7 +606,7 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
     chat_id = str(kwargs.get("chat_id") or session_id or "unknown")
     user_id = str(kwargs.get("user_id") or "unknown")
 
-    logger.debug("body_bridge: firing thinking_start")
+    logger.debug("body_expression_bridge: firing thinking_start")
     _schedule_post(
         "thinking_start",
         text="",
@@ -599,7 +619,7 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
     try:
         return next_call(request)
     finally:
-        logger.debug("body_bridge: firing thinking_end")
+        logger.debug("body_expression_bridge: firing thinking_end")
         _schedule_post(
             "thinking_end",
             text="",
@@ -733,7 +753,7 @@ async def _start_stream_ttl_sweep(loop: asyncio.AbstractEventLoop) -> None:
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("body_bridge: stream TTL sweep error")
+                logger.exception("body_expression_bridge: stream TTL sweep error")
 
     _stream_ttl_task = loop.create_task(_sweep())
 
@@ -821,7 +841,7 @@ async def _api_request_error_hook(
 
 def register(ctx: Any) -> None:
     """Plugin entry point — called by Hermes on startup."""
-    logger.info("Body Bridge plugin loaded: registering hooks and middleware")
+    logger.info("Body Expression Bridge plugin loaded: registering hooks and middleware")
 
     _dispatcher._ensure_worker()
     loop = _dispatcher._worker_loop
@@ -842,7 +862,7 @@ def register(ctx: Any) -> None:
     ctx.register_hook("api_request_error", _api_request_error_hook)
 
     logger.info(
-        "Body Bridge hooks/middleware registered: "
+        "Body Expression Bridge hooks/middleware registered: "
         "post_gateway_admission, post_llm_call, gateway_platform_event, "
         "on_stream_start, on_stream_delta, on_stream_end, "
         "pre_gateway_dispatch, on_session_end, on_session_finalize, "

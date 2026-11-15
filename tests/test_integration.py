@@ -1,9 +1,10 @@
-"""Integration tests for body_bridge - covers protocol, worker loop, and end-to-end flows."""
+"""Integration tests for body_expression_bridge - covers protocol,
+worker loop, and end-to-end flows."""
 
 import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import body_bridge as bb
+import body_expression_bridge as bb
 import pytest
 from aiohttp import web
 

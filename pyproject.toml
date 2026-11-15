@@ -1,7 +1,7 @@
 [project]
-name = "hermes-plugin-body-bridge"
+name = "hermes-plugin-body-expression-bridge"
 version = "0.2.0"
-description = "Forward Hermes agent events to coupling-body Agent Channel for reflexd"
+description = "Outbound expression bridge: forwards Hermes dialogue lifecycle events to reflexd MCP for expressive-body reactions"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
