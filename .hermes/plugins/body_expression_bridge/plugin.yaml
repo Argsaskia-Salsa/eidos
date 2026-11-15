@@ -1,0 +1,32 @@
+name: body-expression-bridge
+version: "0.2.0"
+description: >
+  Outbound expression bridge. Forwards Hermes dialogue lifecycle events
+  (user_message, user_response, thinking_start/end, stream_*, platform_event,
+  session_end, session_finalize, api_error) to reflexd MCP for expressive-body
+  reactions (animations, speech-gesture sync, attention cues).
+  Does NOT provide motor control, sensor ingestion, or LLM tool registration.
+aliases: [body-bridge]
+provides_tools: []
+provides_hooks:
+  - post_gateway_admission
+  - post_llm_call
+  - gateway_platform_event
+  - on_stream_start
+  - on_stream_delta
+  - on_stream_end
+  - pre_gateway_dispatch
+  - on_session_end
+  - on_session_finalize
+  - api_request_error
+provides_middleware:
+  - llm_execution
+config:
+  REFLEXD_MCP_URL:
+    type: string
+    default: "http://localhost:8770/mcp"
+    description: "reflexd MCP endpoint URL"
+  REFLEXD_TIMEOUT_SECONDS:
+    type: number
+    default: 1.0
+    description: "HTTP request timeout in seconds"
