@@ -208,6 +208,35 @@ class EventDispatcher:
             self._pending_futures.add(fut)
         fut.add_done_callback(self._cleanup_future)
 
+    def shutdown(self) -> None:
+        """Stop the worker loop and clean up pending futures."""
+        loop = None
+        with self._worker_lock:
+            if self._worker_loop is not None and self._worker_loop.is_running():
+                loop = self._worker_loop
+                loop.call_soon_threadsafe(loop.stop)
+            self._worker_loop = None
+            self._worker_thread = None
+            self._worker_ready.clear()
+
+        # Don't join daemon thread - it will exit when loop stops
+        # Give the loop a moment to stop
+        if loop is not None:
+            import time
+            time.sleep(0.05)
+
+        with self._pending_lock:
+            for fut in list(self._pending_futures):
+                fut.cancel()
+            self._pending_futures.clear()
+
+    def __del__(self) -> None:
+        """Best-effort cleanup on garbage collection."""
+        try:
+            self.shutdown()
+        except Exception:
+            pass
+
 
 _dispatcher = EventDispatcher()
 

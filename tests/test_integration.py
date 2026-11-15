@@ -10,6 +10,16 @@ from aiohttp import web
 pytestmark = pytest.mark.order(2)
 
 
+@pytest.fixture(autouse=True)
+def cleanup_dispatchers():
+    """Ensure all EventDispatcher instances are shut down after each test."""
+    yield
+    # The global dispatcher is cleaned up by unit test fixture
+    # Individual test instances should be cleaned up by their tests
+    # This fixture exists as a safety net
+    pass
+
+
 class TestReflexdProtocol:
     """Test JSON-RPC protocol compliance with reflexd MCP."""
 
@@ -47,35 +57,38 @@ class TestReflexdProtocol:
             timeout=2.0
         )
 
-        await dispatcher._post_to_reflexd(
-            event_type="user_message",
-            text="Hello world",
-            platform="telegram",
-            chat_id="123",
-            user_id="456",
-        )
+        try:
+            await dispatcher._post_to_reflexd(
+                event_type="user_message",
+                text="Hello world",
+                platform="telegram",
+                chat_id="123",
+                user_id="456",
+            )
 
-        assert len(mock_reflexd_server) == 1
-        req = mock_reflexd_server[0]
+            assert len(mock_reflexd_server) == 1
+            req = mock_reflexd_server[0]
 
-        # JSON-RPC 2.0 structure
-        assert req["jsonrpc"] == "2.0"
-        assert req["method"] == "tools/call"
-        assert req["id"] == 1
+            # JSON-RPC 2.0 structure
+            assert req["jsonrpc"] == "2.0"
+            assert req["method"] == "tools/call"
+            assert req["id"] == 1
 
-        # Tool call structure
-        params = req["params"]
-        assert params["name"] == "inject_event"
-        args = params["arguments"]
-        assert args["name"] == "user_message"
-        assert args["type"] == "inject"
+            # Tool call structure
+            params = req["params"]
+            assert params["name"] == "inject_event"
+            args = params["arguments"]
+            assert args["name"] == "user_message"
+            assert args["type"] == "inject"
 
-        # Data payload
-        data = args["data"]
-        assert data["text"] == "Hello world"
-        assert data["platform"] == "telegram"
-        assert data["chat_id"] == "123"
-        assert data["user_id"] == "456"
+            # Data payload
+            data = args["data"]
+            assert data["text"] == "Hello world"
+            assert data["platform"] == "telegram"
+            assert data["chat_id"] == "123"
+            assert data["user_id"] == "456"
+        finally:
+            dispatcher.shutdown()
 
     @pytest.mark.asyncio
     async def test_all_event_types_protocol(self, mock_reflexd_server):
@@ -85,22 +98,25 @@ class TestReflexdProtocol:
             timeout=2.0
         )
 
-        event_types = ["user_message", "user_response", "thinking_start", "thinking_end"]
+        try:
+            event_types = ["user_message", "user_response", "thinking_start", "thinking_end"]
 
-        for event_type in event_types:
-            mock_reflexd_server.clear()
-            await dispatcher._post_to_reflexd(
-                event_type=event_type,
-                text="test" if "thinking" not in event_type else "",
-                platform="telegram",
-                chat_id="123",
-                user_id="456",
-            )
+            for event_type in event_types:
+                mock_reflexd_server.clear()
+                await dispatcher._post_to_reflexd(
+                    event_type=event_type,
+                    text="test" if "thinking" not in event_type else "",
+                    platform="telegram",
+                    chat_id="123",
+                    user_id="456",
+                )
 
-            assert len(mock_reflexd_server) == 1
-            req = mock_reflexd_server[0]
-            assert req["params"]["arguments"]["name"] == event_type
-            assert req["params"]["arguments"]["type"] == "inject"
+                assert len(mock_reflexd_server) == 1
+                req = mock_reflexd_server[0]
+                assert req["params"]["arguments"]["name"] == event_type
+                assert req["params"]["arguments"]["type"] == "inject"
+        finally:
+            dispatcher.shutdown()
 
     @pytest.mark.asyncio
     async def test_http_error_handling(self, mock_reflexd_server):
@@ -110,21 +126,24 @@ class TestReflexdProtocol:
             timeout=2.0
         )
 
-        with patch("httpx.AsyncClient.post") as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 500
-            mock_post.return_value = mock_response
+        try:
+            with patch("httpx.AsyncClient.post") as mock_post:
+                mock_response = AsyncMock()
+                mock_response.status_code = 500
+                mock_post.return_value = mock_response
 
-            with patch.object(bb.logger, "warning") as mock_warn:
-                await dispatcher._post_to_reflexd(
-                    event_type="user_message",
-                    text="test",
-                    platform="telegram",
-                    chat_id="123",
-                    user_id="456",
-                )
-                mock_warn.assert_called_once()
-                assert "HTTP %s" in mock_warn.call_args.args[0]
+                with patch.object(bb.logger, "warning") as mock_warn:
+                    await dispatcher._post_to_reflexd(
+                        event_type="user_message",
+                        text="test",
+                        platform="telegram",
+                        chat_id="123",
+                        user_id="456",
+                    )
+                    mock_warn.assert_called_once()
+                    assert "HTTP %s" in mock_warn.call_args.args[0]
+        finally:
+            dispatcher.shutdown()
 
 
 class TestWorkerLoopIntegration:
@@ -134,72 +153,97 @@ class TestWorkerLoopIntegration:
         """Test worker loop can be started and used."""
         dispatcher = bb.EventDispatcher()
 
-        loop = dispatcher._ensure_worker()
-        assert loop is not None
-        assert loop.is_running()
+        try:
+            loop = dispatcher._ensure_worker()
+            assert loop is not None
+            assert loop.is_running()
 
-        # Second call returns same loop
-        loop2 = dispatcher._ensure_worker()
-        assert loop is loop2
+            # Second call returns same loop
+            loop2 = dispatcher._ensure_worker()
+            assert loop is loop2
+        finally:
+            dispatcher.shutdown()
 
     def test_schedule_post_from_multiple_threads(self):
         """Test schedule_post is thread-safe."""
         dispatcher = bb.EventDispatcher()
         dispatcher._ensure_worker()
 
-        results = []
-        errors = []
+        try:
+            results = []
+            errors = []
 
-        def call_schedule_post(i):
-            try:
-                dispatcher.schedule_post(
-                    event_type="user_message",
-                    text=f"message-{i}",
-                    platform="telegram",
-                    chat_id="123",
-                    user_id="456",
-                )
-                results.append(i)
-            except Exception as e:
-                errors.append((i, e))
+            with patch("asyncio.run_coroutine_threadsafe") as mock_run:
+                mock_future = MagicMock()
+                
+                def consume_coro(coro, loop):
+                    if hasattr(coro, "close"):
+                        coro.close()
+                    return mock_future
+                
+                mock_run.side_effect = consume_coro
 
-        threads = [threading.Thread(target=call_schedule_post, args=(i,)) for i in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+                def call_schedule_post(i):
+                    try:
+                        dispatcher.schedule_post(
+                            event_type="user_message",
+                            text=f"message-{i}",
+                            platform="telegram",
+                            chat_id="123",
+                            user_id="456",
+                        )
+                        results.append(i)
+                    except Exception as e:
+                        errors.append((i, e))
 
-        assert len(errors) == 0
-        assert len(results) == 10
+                threads = [threading.Thread(target=call_schedule_post, args=(i,)) for i in range(10)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+
+                assert len(errors) == 0
+                assert len(results) == 10
+        finally:
+            dispatcher.shutdown()
 
     def test_pending_futures_tracked_and_cleaned(self):
         """Test in-flight futures are tracked and cleaned up."""
         dispatcher = bb.EventDispatcher()
         dispatcher._ensure_worker()
 
-        initial_pending = len(dispatcher._pending_futures)
+        try:
+            initial_pending = len(dispatcher._pending_futures)
 
-        with patch("asyncio.run_coroutine_threadsafe") as mock_run:
-            mock_future = MagicMock()
-            mock_run.return_value = mock_future
+            with patch("asyncio.run_coroutine_threadsafe") as mock_run:
+                mock_future = MagicMock()
+                
+                def consume_coro(coro, loop):
+                    if hasattr(coro, "close"):
+                        coro.close()
+                    return mock_future
+                
+                mock_run.side_effect = consume_coro
 
-            dispatcher.schedule_post(
-                event_type="user_message",
-                text="test",
-                platform="telegram",
-                chat_id="123",
-                user_id="456",
-            )
+                dispatcher.schedule_post(
+                    event_type="user_message",
+                    text="test",
+                    platform="telegram",
+                    chat_id="123",
+                    user_id="456",
+                )
 
-            # Future should be added
-            assert len(dispatcher._pending_futures) == initial_pending + 1
-            assert mock_future in dispatcher._pending_futures
+                # Future should be added
+                assert len(dispatcher._pending_futures) == initial_pending + 1
+                assert mock_future in dispatcher._pending_futures
 
-            # Simulate completion
-            mock_future.add_done_callback.call_args[0][0](mock_future)
+                # Simulate completion
+                mock_future.add_done_callback.call_args[0][0](mock_future)
 
-            # Future should be cleaned up
-            assert len(dispatcher._pending_futures) == initial_pending
+                # Future should be cleaned up
+                assert len(dispatcher._pending_futures) == initial_pending
+        finally:
+            dispatcher.shutdown()
 
 
 class TestEndToEndFlow:
@@ -214,21 +258,24 @@ class TestEndToEndFlow:
         )
         dispatcher._ensure_worker()
 
-        # Use dispatcher directly (bypasses async scheduling for test)
-        await dispatcher._post_to_reflexd(
-            event_type="user_message",
-            text="Hello from user",
-            platform="telegram",
-            chat_id="chat-1",
-            user_id="user-1",
-        )
+        try:
+            # Use dispatcher directly (bypasses async scheduling for test)
+            await dispatcher._post_to_reflexd(
+                event_type="user_message",
+                text="Hello from user",
+                platform="telegram",
+                chat_id="chat-1",
+                user_id="user-1",
+            )
 
-        assert len(mock_reflexd_server) == 1
-        req = mock_reflexd_server[0]
-        assert req["params"]["arguments"]["name"] == "user_message"
-        assert req["params"]["arguments"]["data"]["text"] == "Hello from user"
-        assert req["params"]["arguments"]["data"]["chat_id"] == "chat-1"
-        assert req["params"]["arguments"]["data"]["user_id"] == "user-1"
+            assert len(mock_reflexd_server) == 1
+            req = mock_reflexd_server[0]
+            assert req["params"]["arguments"]["name"] == "user_message"
+            assert req["params"]["arguments"]["data"]["text"] == "Hello from user"
+            assert req["params"]["arguments"]["data"]["chat_id"] == "chat-1"
+            assert req["params"]["arguments"]["data"]["user_id"] == "user-1"
+        finally:
+            dispatcher.shutdown()
 
     @pytest.mark.asyncio
     async def test_llm_call_to_reflexd(self, mock_reflexd_server):
@@ -239,20 +286,23 @@ class TestEndToEndFlow:
         )
         dispatcher._ensure_worker()
 
-        await dispatcher._post_to_reflexd(
-            event_type="user_response",
-            text="Hello there!",
-            platform="telegram",
-            chat_id="chat-1",
-            user_id="user-1",
-        )
+        try:
+            await dispatcher._post_to_reflexd(
+                event_type="user_response",
+                text="Hello there!",
+                platform="telegram",
+                chat_id="chat-1",
+                user_id="user-1",
+            )
 
-        assert len(mock_reflexd_server) == 1
-        req = mock_reflexd_server[0]
-        assert req["params"]["arguments"]["name"] == "user_response"
-        assert req["params"]["arguments"]["data"]["text"] == "Hello there!"
-        assert req["params"]["arguments"]["data"]["chat_id"] == "chat-1"
-        assert req["params"]["arguments"]["data"]["user_id"] == "user-1"
+            assert len(mock_reflexd_server) == 1
+            req = mock_reflexd_server[0]
+            assert req["params"]["arguments"]["name"] == "user_response"
+            assert req["params"]["arguments"]["data"]["text"] == "Hello there!"
+            assert req["params"]["arguments"]["data"]["chat_id"] == "chat-1"
+            assert req["params"]["arguments"]["data"]["user_id"] == "user-1"
+        finally:
+            dispatcher.shutdown()
 
     @pytest.mark.asyncio
     async def test_hook_extracts_chat_user_from_history(self):
@@ -281,56 +331,74 @@ class TestEndToEndFlow:
         dispatcher = bb.EventDispatcher()
         dispatcher._ensure_worker()
 
-        with patch("asyncio.run_coroutine_threadsafe") as mock_run:
-            mock_future = MagicMock()
-            mock_run.return_value = mock_future
+        try:
+            with patch("asyncio.run_coroutine_threadsafe") as mock_run:
+                mock_future = MagicMock()
+                
+                def consume_coro(coro, loop):
+                    if hasattr(coro, "close"):
+                        coro.close()
+                    return mock_future
+                
+                mock_run.side_effect = consume_coro
 
-            def next_call(request):
-                return {"response": "ok"}
+                def next_call(request):
+                    return {"response": "ok"}
 
-            result = bb._llm_execution_middleware(
-                request={"messages": []},
-                next_call=next_call,
-                platform="telegram",
-                session_id="sess-1",
-                chat_id="chat-1",
-                user_id="user-1",
-            )
-
-            assert result == {"response": "ok"}
-            assert mock_run.call_count == 2
-
-            # Verify both events scheduled
-            calls = mock_run.call_args_list
-            coro1 = calls[0][0][0]
-            coro2 = calls[1][0][0]
-            assert coro1.cr_code.co_name == "_post"
-            assert coro2.cr_code.co_name == "_post"
-
-    def test_middleware_thinking_end_on_exception(self):
-        """Test thinking_end fires even when next_call raises."""
-        dispatcher = bb.EventDispatcher()
-        dispatcher._ensure_worker()
-
-        with patch("asyncio.run_coroutine_threadsafe") as mock_run:
-            mock_future = MagicMock()
-            mock_run.return_value = mock_future
-
-            def failing_next_call(request):
-                raise Exception("LLM failed")
-
-            with pytest.raises(Exception, match="LLM failed"):
-                bb._llm_execution_middleware(
+                result = bb._llm_execution_middleware(
                     request={"messages": []},
-                    next_call=failing_next_call,
+                    next_call=next_call,
                     platform="telegram",
                     session_id="sess-1",
                     chat_id="chat-1",
                     user_id="user-1",
                 )
 
-            # Both events should still be scheduled
-            assert mock_run.call_count == 2
+                assert result == {"response": "ok"}
+                assert mock_run.call_count == 2
+
+                # Verify both events scheduled
+                calls = mock_run.call_args_list
+                coro1 = calls[0][0][0]
+                coro2 = calls[1][0][0]
+                assert coro1.cr_code.co_name == "_post"
+                assert coro2.cr_code.co_name == "_post"
+        finally:
+            dispatcher.shutdown()
+
+    def test_middleware_thinking_end_on_exception(self):
+        """Test thinking_end fires even when next_call raises."""
+        dispatcher = bb.EventDispatcher()
+        dispatcher._ensure_worker()
+
+        try:
+            with patch("asyncio.run_coroutine_threadsafe") as mock_run:
+                mock_future = MagicMock()
+                
+                def consume_coro(coro, loop):
+                    if hasattr(coro, "close"):
+                        coro.close()
+                    return mock_future
+                
+                mock_run.side_effect = consume_coro
+
+                def failing_next_call(request):
+                    raise Exception("LLM failed")
+
+                with pytest.raises(Exception, match="LLM failed"):
+                    bb._llm_execution_middleware(
+                        request={"messages": []},
+                        next_call=failing_next_call,
+                        platform="telegram",
+                        session_id="sess-1",
+                        chat_id="chat-1",
+                        user_id="user-1",
+                    )
+
+                # Both events should still be scheduled
+                assert mock_run.call_count == 2
+        finally:
+            dispatcher.shutdown()
 
 
 class TestConfigurationIntegration:
@@ -368,37 +436,49 @@ class TestPlatformFilteringIntegration:
         dispatcher = bb.EventDispatcher()
         dispatcher._ensure_worker()
 
-        with patch("asyncio.run_coroutine_threadsafe") as mock_run:
-            for platform in ["local", "desktop", "cli", "LOCAL", "Desktop"]:
-                mock_run.reset_mock()
-                dispatcher.schedule_post(
-                    event_type="user_message",
-                    text="test",
-                    platform=platform,
-                    chat_id="123",
-                    user_id="456",
-                )
-                mock_run.assert_not_called()
+        try:
+            with patch("asyncio.run_coroutine_threadsafe") as mock_run:
+                for platform in ["local", "desktop", "cli", "LOCAL", "Desktop"]:
+                    mock_run.reset_mock()
+                    dispatcher.schedule_post(
+                        event_type="user_message",
+                        text="test",
+                        platform=platform,
+                        chat_id="123",
+                        user_id="456",
+                    )
+                    mock_run.assert_not_called()
+        finally:
+            dispatcher.shutdown()
 
     def test_remote_platforms_processed(self):
         """Test remote platforms are processed."""
         dispatcher = bb.EventDispatcher()
         dispatcher._ensure_worker()
 
-        with patch("asyncio.run_coroutine_threadsafe") as mock_run:
-            mock_future = MagicMock()
-            mock_run.return_value = mock_future
+        try:
+            with patch("asyncio.run_coroutine_threadsafe") as mock_run:
+                mock_future = MagicMock()
+                
+                def consume_coro(coro, loop):
+                    if hasattr(coro, "close"):
+                        coro.close()
+                    return mock_future
+                
+                mock_run.side_effect = consume_coro
 
-            for platform in ["telegram", "discord", "slack", "whatsapp"]:
-                mock_run.reset_mock()
-                dispatcher.schedule_post(
-                    event_type="user_message",
-                    text="test",
-                    platform=platform,
-                    chat_id="123",
-                    user_id="456",
-                )
-                mock_run.assert_called_once()
+                for platform in ["telegram", "discord", "slack", "whatsapp"]:
+                    mock_run.reset_mock()
+                    dispatcher.schedule_post(
+                        event_type="user_message",
+                        text="test",
+                        platform=platform,
+                        chat_id="123",
+                        user_id="456",
+                    )
+                    mock_run.assert_called_once()
+        finally:
+            dispatcher.shutdown()
 
 
 class TestErrorRecovery:
@@ -412,44 +492,53 @@ class TestErrorRecovery:
             timeout=0.1
         )
 
-        with patch.object(bb.logger, "warning") as mock_warn:
-            await dispatcher._post_to_reflexd(
-                event_type="user_message",
-                text="test",
-                platform="telegram",
-                chat_id="123",
-                user_id="456",
-            )
-            mock_warn.assert_called_once()
-            assert "failed" in mock_warn.call_args.args[0].lower()
+        try:
+            with patch.object(bb.logger, "warning") as mock_warn:
+                await dispatcher._post_to_reflexd(
+                    event_type="user_message",
+                    text="test",
+                    platform="telegram",
+                    chat_id="123",
+                    user_id="456",
+                )
+                mock_warn.assert_called_once()
+                assert "failed" in mock_warn.call_args.args[0].lower()
+        finally:
+            dispatcher.shutdown()
 
     def test_worker_loop_failure_handled(self):
         """Test worker loop startup failure is handled."""
         dispatcher = bb.EventDispatcher()
 
-        # Simulate worker thread failing to start
-        with patch.object(dispatcher, "_worker_ready") as mock_ready:
-            mock_ready.wait.return_value = False
+        try:
+            # Simulate worker thread failing to start
+            with patch.object(dispatcher, "_worker_ready") as mock_ready:
+                mock_ready.wait.return_value = False
 
-            loop = dispatcher._ensure_worker()
-            assert loop is None
+                loop = dispatcher._ensure_worker()
+                assert loop is None
+        finally:
+            dispatcher.shutdown()
 
     def test_schedule_post_handles_no_loop(self):
         """Test schedule_post handles unavailable worker loop."""
         dispatcher = bb.EventDispatcher()
 
-        with patch.object(dispatcher, "_ensure_worker", return_value=None), patch.object(
-            bb.logger, "warning"
-        ) as mock_warn:
-            dispatcher.schedule_post(
-                event_type="user_message",
-                text="test",
-                platform="telegram",
-                chat_id="123",
-                user_id="456",
-            )
-            mock_warn.assert_called_once()
-            assert "worker loop unavailable" in mock_warn.call_args.args[0]
+        try:
+            with patch.object(dispatcher, "_ensure_worker", return_value=None), patch.object(
+                bb.logger, "warning"
+            ) as mock_warn:
+                dispatcher.schedule_post(
+                    event_type="user_message",
+                    text="test",
+                    platform="telegram",
+                    chat_id="123",
+                    user_id="456",
+                )
+                mock_warn.assert_called_once()
+                assert "worker loop unavailable" in mock_warn.call_args.args[0]
+        finally:
+            dispatcher.shutdown()
 
 
 class TestRegisterIntegration:

@@ -1,5 +1,6 @@
 """Tests for body_bridge plugin - covers current functionality before refactoring."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import body_bridge as bb
@@ -288,7 +289,13 @@ class TestLlmExecutionMiddleware:
         next_call = MagicMock(return_value={"response": "ok"})
         with patch("asyncio.run_coroutine_threadsafe") as mock_run:
             mock_future = MagicMock()
-            mock_run.return_value = mock_future
+            
+            def consume_coro(coro, loop):
+                if hasattr(coro, "close"):
+                    coro.close()
+                return mock_future
+            
+            mock_run.side_effect = consume_coro
 
             bb._llm_execution_middleware(
                 request=request,
@@ -308,7 +315,14 @@ class TestLlmExecutionMiddleware:
         next_call = MagicMock(side_effect=Exception("LLM failed"))
         with patch("asyncio.run_coroutine_threadsafe") as mock_run:
             mock_future = MagicMock()
-            mock_run.return_value = mock_future
+            
+            def consume_coro(coro, loop):
+                # Consume the coroutine to avoid "never awaited" warning
+                if hasattr(coro, "close"):
+                    coro.close()
+                return mock_future
+            
+            mock_run.side_effect = consume_coro
 
             with pytest.raises(Exception, match="LLM failed"):
                 bb._llm_execution_middleware(
@@ -344,7 +358,13 @@ class TestWorkerLoop:
 
             with patch("asyncio.run_coroutine_threadsafe") as mock_run:
                 mock_future = MagicMock()
-                mock_run.return_value = mock_future
+                
+                def consume_coro(coro, loop):
+                    if hasattr(coro, "close"):
+                        coro.close()
+                    return mock_future
+                
+                mock_run.side_effect = consume_coro
 
                 bb._dispatcher.schedule_post("user_message", "text", "telegram", "chat-1", "user-1")
                 mock_run.assert_called_once()
@@ -474,6 +494,8 @@ def reset_dispatcher():
     bb._dispatcher._worker_thread = None
     bb._dispatcher._worker_ready.clear()
     yield
+    # Don't call shutdown() here as the worker loop/thread are mocked
+    # Reset state again after test
     for fut in list(bb._dispatcher._pending_futures):
         fut.cancel()
     bb._dispatcher._pending_futures.clear()
@@ -488,6 +510,12 @@ def mock_worker_loop(monkeypatch):
     mock_loop = MagicMock()
     mock_loop.is_running.return_value = True
 
+    def consume_coro(coro, loop):
+        if hasattr(coro, "close"):
+            coro.close()
+        mock_future = MagicMock()
+        return mock_future
+
     # Patch global dispatcher
     monkeypatch.setattr(bb._dispatcher, "_ensure_worker", lambda: mock_loop)
     monkeypatch.setattr(bb._dispatcher, "_worker_loop", mock_loop)
@@ -499,3 +527,6 @@ def mock_worker_loop(monkeypatch):
     monkeypatch.setattr(bb.EventDispatcher, "_ensure_worker", patched_ensure)
     # Also patch _worker_loop for new instances
     monkeypatch.setattr(bb.EventDispatcher, "_worker_loop", mock_loop, raising=False)
+
+    # Patch run_coroutine_threadsafe to consume coroutines and avoid "never awaited" warnings
+    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", consume_coro)
