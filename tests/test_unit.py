@@ -4,6 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import body_bridge as bb
+import httpx
 import pytest
 
 pytestmark = pytest.mark.order(1)
@@ -289,12 +290,12 @@ class TestLlmExecutionMiddleware:
         next_call = MagicMock(return_value={"response": "ok"})
         with patch("asyncio.run_coroutine_threadsafe") as mock_run:
             mock_future = MagicMock()
-            
+
             def consume_coro(coro, loop):
                 if hasattr(coro, "close"):
                     coro.close()
                 return mock_future
-            
+
             mock_run.side_effect = consume_coro
 
             bb._llm_execution_middleware(
@@ -315,13 +316,13 @@ class TestLlmExecutionMiddleware:
         next_call = MagicMock(side_effect=Exception("LLM failed"))
         with patch("asyncio.run_coroutine_threadsafe") as mock_run:
             mock_future = MagicMock()
-            
+
             def consume_coro(coro, loop):
                 # Consume the coroutine to avoid "never awaited" warning
                 if hasattr(coro, "close"):
                     coro.close()
                 return mock_future
-            
+
             mock_run.side_effect = consume_coro
 
             with pytest.raises(Exception, match="LLM failed"):
@@ -358,16 +359,86 @@ class TestWorkerLoop:
 
             with patch("asyncio.run_coroutine_threadsafe") as mock_run:
                 mock_future = MagicMock()
-                
+
                 def consume_coro(coro, loop):
                     if hasattr(coro, "close"):
                         coro.close()
                     return mock_future
-                
+
                 mock_run.side_effect = consume_coro
 
                 bb._dispatcher.schedule_post("user_message", "text", "telegram", "chat-1", "user-1")
                 mock_run.assert_called_once()
+
+
+class TestHttpClient:
+    """Test httpx client management (reuse, close)."""
+
+    @pytest.mark.asyncio
+    async def test_get_client_creates_client(self):
+        dispatcher = bb.EventDispatcher()
+        dispatcher._worker_loop = MagicMock()
+        dispatcher._worker_loop.is_running.return_value = True
+
+        client = await dispatcher._get_client()
+        assert client is not None
+        assert isinstance(client, httpx.AsyncClient)
+        assert not client.is_closed
+
+    @pytest.mark.asyncio
+    async def test_get_client_reuses_client(self):
+        dispatcher = bb.EventDispatcher()
+        dispatcher._worker_loop = MagicMock()
+        dispatcher._worker_loop.is_running.return_value = True
+
+        client1 = await dispatcher._get_client()
+        client2 = await dispatcher._get_client()
+        assert client1 is client2
+
+    @pytest.mark.asyncio
+    async def test_get_client_recreates_after_close(self):
+        dispatcher = bb.EventDispatcher()
+        dispatcher._worker_loop = MagicMock()
+        dispatcher._worker_loop.is_running.return_value = True
+
+        client1 = await dispatcher._get_client()
+        await client1.aclose()
+
+        client2 = await dispatcher._get_client()
+        assert client1 is not client2
+        assert not client2.is_closed
+
+    def test_close_client_schedules_aclose_on_loop(self):
+        dispatcher = bb.EventDispatcher()
+        mock_loop = MagicMock()
+        mock_loop.is_running.return_value = True
+
+        dispatcher._client = AsyncMock()
+        dispatcher._client.is_closed = False
+
+        dispatcher._close_client(mock_loop)
+
+        mock_loop.call_soon_threadsafe.assert_called_once()
+        assert dispatcher._client is None
+
+    def test_close_client_skips_if_none(self):
+        dispatcher = bb.EventDispatcher()
+        mock_loop = MagicMock()
+        dispatcher._client = None
+
+        dispatcher._close_client(mock_loop)
+
+        mock_loop.call_soon_threadsafe.assert_not_called()
+
+    def test_close_client_skips_if_already_closed(self):
+        dispatcher = bb.EventDispatcher()
+        mock_loop = MagicMock()
+        dispatcher._client = MagicMock()
+        dispatcher._client.is_closed = True
+
+        dispatcher._close_client(mock_loop)
+
+        mock_loop.call_soon_threadsafe.assert_not_called()
 
 
 class TestSchedulePost:

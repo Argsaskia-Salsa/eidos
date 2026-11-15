@@ -17,6 +17,7 @@ Configuration:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import threading
@@ -100,6 +101,15 @@ class EventDispatcher:
         self._worker_lock = threading.Lock()
         self._pending_futures: set[asyncio.Future[Any]] = set()
         self._pending_lock = threading.Lock()
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=0.5, read=1.0, write=1.0, pool=5.0),
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            )
+        return self._client
 
     def _ensure_worker(self) -> asyncio.AbstractEventLoop | None:
         """Start (or restart) the worker loop. Returns the loop, or None on failure."""
@@ -134,6 +144,12 @@ class EventDispatcher:
         with self._pending_lock:
             self._pending_futures.discard(fut)
 
+    def _close_client(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Close the httpx client on the worker loop."""
+        if self._client is not None and not self._client.is_closed:
+            loop.call_soon_threadsafe(lambda: asyncio.create_task(self._client.aclose()))
+            self._client = None
+
     async def _post_to_reflexd(
         self,
         event_type: str,
@@ -146,27 +162,28 @@ class EventDispatcher:
         payload = _build_payload(event_type, text, platform, chat_id, user_id)
 
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(
-                    self._mcp_url,
-                    json={
-                        "jsonrpc": "2.0",
-                        "method": "tools/call",
-                        "params": {
-                            "name": "inject_event",
-                            "arguments": payload,
-                        },
-                        "id": 1,
+            client = await self._get_client()
+            response = await client.post(
+                self._mcp_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "inject_event",
+                        "arguments": payload,
                     },
+                    "id": 1,
+                },
+                timeout=self._timeout,
+            )
+            if response.status_code >= 400:
+                logger.warning(
+                    "body_bridge: POST %s -> HTTP %s",
+                    event_type,
+                    response.status_code,
                 )
-                if response.status_code >= 400:
-                    logger.warning(
-                        "body_bridge: POST %s -> HTTP %s",
-                        event_type,
-                        response.status_code,
-                    )
-                else:
-                    logger.info("body_bridge: POST %s -> HTTP %s", event_type, response.status_code)
+            else:
+                logger.info("body_bridge: POST %s -> HTTP %s", event_type, response.status_code)
         except Exception as e:
             logger.warning("body_bridge: POST %s failed: %s", event_type, e)
 
@@ -214,6 +231,7 @@ class EventDispatcher:
         with self._worker_lock:
             if self._worker_loop is not None and self._worker_loop.is_running():
                 loop = self._worker_loop
+                self._close_client(loop)
                 loop.call_soon_threadsafe(loop.stop)
             self._worker_loop = None
             self._worker_thread = None
@@ -223,6 +241,7 @@ class EventDispatcher:
         # Give the loop a moment to stop
         if loop is not None:
             import time
+
             time.sleep(0.05)
 
         with self._pending_lock:
@@ -232,10 +251,8 @@ class EventDispatcher:
 
     def __del__(self) -> None:
         """Best-effort cleanup on garbage collection."""
-        try:
+        with contextlib.suppress(Exception):
             self.shutdown()
-        except Exception:
-            pass
 
 
 _dispatcher = EventDispatcher()

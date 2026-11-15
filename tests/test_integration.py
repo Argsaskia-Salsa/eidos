@@ -121,10 +121,7 @@ class TestReflexdProtocol:
     @pytest.mark.asyncio
     async def test_http_error_handling(self, mock_reflexd_server):
         """Test handling of HTTP 5xx errors from reflexd."""
-        dispatcher = bb.EventDispatcher(
-            mcp_url="http://localhost:18770/mcp",
-            timeout=2.0
-        )
+        dispatcher = bb.EventDispatcher(mcp_url="http://localhost:18770/mcp", timeout=2.0)
 
         try:
             with patch("httpx.AsyncClient.post") as mock_post:
@@ -175,12 +172,12 @@ class TestWorkerLoopIntegration:
 
             with patch("asyncio.run_coroutine_threadsafe") as mock_run:
                 mock_future = MagicMock()
-                
+
                 def consume_coro(coro, loop):
                     if hasattr(coro, "close"):
                         coro.close()
                     return mock_future
-                
+
                 mock_run.side_effect = consume_coro
 
                 def call_schedule_post(i):
@@ -196,7 +193,10 @@ class TestWorkerLoopIntegration:
                     except Exception as e:
                         errors.append((i, e))
 
-                threads = [threading.Thread(target=call_schedule_post, args=(i,)) for i in range(10)]
+                thread_args = [(i,) for i in range(10)]
+                threads = [
+                    threading.Thread(target=call_schedule_post, args=args) for args in thread_args
+                ]
                 for t in threads:
                     t.start()
                 for t in threads:
@@ -217,12 +217,12 @@ class TestWorkerLoopIntegration:
 
             with patch("asyncio.run_coroutine_threadsafe") as mock_run:
                 mock_future = MagicMock()
-                
+
                 def consume_coro(coro, loop):
                     if hasattr(coro, "close"):
                         coro.close()
                     return mock_future
-                
+
                 mock_run.side_effect = consume_coro
 
                 dispatcher.schedule_post(
@@ -334,12 +334,12 @@ class TestEndToEndFlow:
         try:
             with patch("asyncio.run_coroutine_threadsafe") as mock_run:
                 mock_future = MagicMock()
-                
+
                 def consume_coro(coro, loop):
                     if hasattr(coro, "close"):
                         coro.close()
                     return mock_future
-                
+
                 mock_run.side_effect = consume_coro
 
                 def next_call(request):
@@ -374,12 +374,12 @@ class TestEndToEndFlow:
         try:
             with patch("asyncio.run_coroutine_threadsafe") as mock_run:
                 mock_future = MagicMock()
-                
+
                 def consume_coro(coro, loop):
                     if hasattr(coro, "close"):
                         coro.close()
                     return mock_future
-                
+
                 mock_run.side_effect = consume_coro
 
                 def failing_next_call(request):
@@ -409,6 +409,7 @@ class TestConfigurationIntegration:
         with patch.dict("os.environ", {"REFLEXD_MCP_URL": "http://custom:9999/mcp"}):
             # Need to reimport to pick up new env
             import importlib
+
             importlib.reload(bb)
             assert bb._REFLEXD_MCP_URL == "http://custom:9999/mcp"
 
@@ -416,6 +417,7 @@ class TestConfigurationIntegration:
         """Test custom timeout from environment."""
         with patch.dict("os.environ", {"REFLEXD_TIMEOUT_SECONDS": "5.5"}):
             import importlib
+
             importlib.reload(bb)
             assert bb._REFLEXD_TIMEOUT == 5.5
 
@@ -423,6 +425,7 @@ class TestConfigurationIntegration:
         """Test defaults used when env vars not set."""
         with patch.dict("os.environ", {}, clear=True):
             import importlib
+
             importlib.reload(bb)
             assert bb._REFLEXD_MCP_URL == "http://localhost:8770/mcp"
             assert bb._REFLEXD_TIMEOUT == 1.0
@@ -459,12 +462,12 @@ class TestPlatformFilteringIntegration:
         try:
             with patch("asyncio.run_coroutine_threadsafe") as mock_run:
                 mock_future = MagicMock()
-                
+
                 def consume_coro(coro, loop):
                     if hasattr(coro, "close"):
                         coro.close()
                     return mock_future
-                
+
                 mock_run.side_effect = consume_coro
 
                 for platform in ["telegram", "discord", "slack", "whatsapp"]:
@@ -487,10 +490,7 @@ class TestErrorRecovery:
     @pytest.mark.asyncio
     async def test_network_failure_doesnt_crash(self):
         """Test network failures are logged but don't crash."""
-        dispatcher = bb.EventDispatcher(
-            mcp_url="http://unreachable:9999/mcp",
-            timeout=0.1
-        )
+        dispatcher = bb.EventDispatcher(mcp_url="http://unreachable:9999/mcp", timeout=0.1)
 
         try:
             with patch.object(bb.logger, "warning") as mock_warn:
@@ -525,9 +525,10 @@ class TestErrorRecovery:
         dispatcher = bb.EventDispatcher()
 
         try:
-            with patch.object(dispatcher, "_ensure_worker", return_value=None), patch.object(
-                bb.logger, "warning"
-            ) as mock_warn:
+            with (
+                patch.object(dispatcher, "_ensure_worker", return_value=None),
+                patch.object(bb.logger, "warning") as mock_warn,
+            ):
                 dispatcher.schedule_post(
                     event_type="user_message",
                     text="test",
