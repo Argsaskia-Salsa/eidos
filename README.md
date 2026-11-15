@@ -139,6 +139,11 @@ All events are sent via JSON-RPC `tools/call` to the `inject_event` tool:
         "platform": "telegram|discord|slack|...|stream",
         "chat_id": "unique chat identifier (or session_id for stream events)",
         "user_id": "unique user identifier (empty for stream events)",
+        "session_id": "session identifier (empty for stream events)",
+        "turn_id": "turn identifier (empty for stream events)",
+        "seq": 1,
+        "ts": 1700000000.123,
+        "v": 1,
         "data": {
           "event_type": "platform event type (for platform_event)",
           "payload": "full platform event payload (for platform_event)"
@@ -150,6 +155,18 @@ All events are sent via JSON-RPC `tools/call` to the `inject_event` tool:
   "id": 1
 }
 ```
+
+**Field descriptions:**
+- `text`: Event text content (empty for thinking/stream/session events)
+- `platform`: Source platform (telegram, discord, slack, etc. or "stream")
+- `chat_id`: Unique chat identifier (session_id for stream events)
+- `user_id`: Unique user identifier (empty for stream events)
+- `session_id`: Session identifier (empty for stream events)
+- `turn_id`: Turn identifier (empty for stream events)
+- `seq`: Monotonically increasing sequence number per plugin instance
+- `ts`: Unix timestamp (seconds since epoch, float)
+- `v`: Payload schema version (currently 1)
+- `data`: Optional nested data (used by `platform_event` for `event_type` and `payload`)
 
 **Event-specific notes:**
 - `thinking_start`/`thinking_end`: `text` is empty string
