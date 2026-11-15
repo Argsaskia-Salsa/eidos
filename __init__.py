@@ -3,9 +3,17 @@
 Hooks:
 - post_gateway_admission → user_message (after auth/admission, inside session slot)
 - post_llm_call → user_response (after LLM completes its turn)
+- gateway_platform_event → platform_event (Telegram reactions, edits)
+- on_stream_start → stream_start (streaming generation begins)
+- on_stream_delta → stream_delta (streaming text delta, throttled)
+- on_stream_end → stream_end (streaming generation ends)
+- pre_gateway_dispatch → filter/rewrite incoming events before auth
+- on_session_end → session_end (per-turn session close)
+- on_session_finalize → session_finalize (session boundary cleanup)
+- api_request_error → api_error (LLM API failures)
 
 Middleware:
-- LLM_EXECUTION_MIDDLEWARE → thinking_start / thinking_end (at exact LLM generation boundaries)
+- llm_execution → thinking_start / thinking_end (at exact LLM generation boundaries)
 
 Posts to reflexd MCP (http://localhost:8770/mcp) for reflexd consumption.
 
@@ -21,6 +29,7 @@ import contextlib
 import logging
 import os
 import threading
+from collections import defaultdict
 from typing import Any
 
 import httpx
@@ -36,6 +45,11 @@ _REFLEXD_TIMEOUT = float(os.getenv("REFLEXD_TIMEOUT_SECONDS", str(DEFAULT_TIMEOU
 
 _LOCAL_PLATFORMS: frozenset[str] = frozenset({"local", "desktop", "cli"})
 
+_stream_buffer: dict[str, list[str]] = defaultdict(list)
+_stream_timers: dict[str, asyncio.Task] = {}
+_STREAM_FLUSH_CHARS = 80
+_STREAM_FLUSH_MS = 100
+
 
 def _is_local_platform(platform: str | None) -> bool:
     """Check if platform should be skipped (local development platforms)."""
@@ -50,16 +64,20 @@ def _build_payload(
     platform: str,
     chat_id: str,
     user_id: str,
+    data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the payload for reflexd inject_event."""
+    payload_data = {
+        "text": text or "",
+        "platform": platform or "unknown",
+        "chat_id": chat_id,
+        "user_id": user_id,
+    }
+    if data is not None:
+        payload_data["data"] = data
     return {
         "name": event_type,
-        "data": {
-            "text": text or "",
-            "platform": platform or "unknown",
-            "chat_id": chat_id,
-            "user_id": user_id,
-        },
+        "data": payload_data,
         "type": "inject",
     }
 
@@ -157,9 +175,10 @@ class EventDispatcher:
         platform: str,
         chat_id: str,
         user_id: str,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """Send a single event to reflexd MCP endpoint."""
-        payload = _build_payload(event_type, text, platform, chat_id, user_id)
+        payload = _build_payload(event_type, text, platform, chat_id, user_id, data)
 
         try:
             client = await self._get_client()
@@ -194,6 +213,7 @@ class EventDispatcher:
         platform: str,
         chat_id: str,
         user_id: str,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """Schedule a fire-and-forget POST to reflexd MCP (thread-safe)."""
         logger.info(
@@ -213,7 +233,7 @@ class EventDispatcher:
             return
 
         async def _post() -> None:
-            await self._post_to_reflexd(event_type, text, platform, chat_id, user_id)
+            await self._post_to_reflexd(event_type, text, platform, chat_id, user_id, data)
 
         try:
             fut = asyncio.run_coroutine_threadsafe(_post(), loop)
@@ -264,9 +284,10 @@ def _schedule_post(
     platform: str,
     chat_id: str,
     user_id: str,
+    data: dict[str, Any] | None = None,
 ) -> None:
     """Backward-compatible wrapper for existing hook/middleware code."""
-    _dispatcher.schedule_post(event_type, text, platform, chat_id, user_id)
+    _dispatcher.schedule_post(event_type, text, platform, chat_id, user_id, data)
 
 
 async def _post_gateway_admission_hook(
@@ -396,6 +417,139 @@ def _llm_execution_middleware(**kwargs: Any) -> Any:
         )
 
 
+async def _gateway_platform_event_hook(
+    platform: str, event_type: str, payload: dict, **kwargs
+) -> None:
+    """Forward platform events (reactions, edits) to reflexd."""
+    chat_id = str(payload.get("chat_id") or "unknown")
+    user_id = str(payload.get("user_id") or "unknown")
+
+    _schedule_post(
+        "platform_event",
+        text="",
+        platform=platform,
+        chat_id=chat_id,
+        user_id=user_id,
+        data={
+            "event_type": event_type,
+            "payload": payload,
+        },
+    )
+
+
+async def _on_stream_start_hook(
+    session_id: str, turn_id: str, iteration: int, model: str, provider: str, surface: str, **kwargs
+) -> None:
+    _schedule_post("stream_start", text="", platform="stream", chat_id=session_id, user_id="")
+
+
+async def _on_stream_delta_hook(
+    session_id: str,
+    turn_id: str,
+    iteration: int,
+    model: str,
+    provider: str,
+    surface: str,
+    delta: str,
+    kind: str,
+    **kwargs,
+) -> None:
+    _stream_buffer[session_id].append(delta)
+    if sum(len(d) for d in _stream_buffer[session_id]) >= _STREAM_FLUSH_CHARS:
+        if _stream_timers.get(session_id):
+            _stream_timers[session_id].cancel()
+        await _flush_stream_buffer(session_id)
+    else:
+        if session_id not in _stream_timers:
+
+            async def _timer() -> None:
+                await asyncio.sleep(_STREAM_FLUSH_MS / 1000)
+                await _flush_stream_buffer(session_id)
+
+            _stream_timers[session_id] = asyncio.create_task(_timer())
+
+
+async def _on_stream_end_hook(
+    session_id: str,
+    turn_id: str,
+    iteration: int,
+    model: str,
+    provider: str,
+    surface: str,
+    final_text: str,
+    finished: bool,
+    error: str | None,
+    **kwargs,
+) -> None:
+    await _flush_stream_buffer(session_id)
+    _schedule_post("stream_end", text=final_text, platform="stream", chat_id=session_id, user_id="")
+
+
+async def _flush_stream_buffer(session_id: str) -> None:
+    if session_id not in _stream_buffer:
+        return
+    text = "".join(_stream_buffer.pop(session_id, []))
+    if text:
+        _schedule_post("stream_delta", text=text, platform="stream", chat_id=session_id, user_id="")
+    _stream_timers.pop(session_id, None)
+
+
+async def _pre_gateway_dispatch_hook(
+    event: Any, gateway: Any, session_store: Any, **kwargs
+) -> dict | None:
+    """Filter/rewrite incoming events before auth/pairing."""
+    text = getattr(event, "text", "") if hasattr(event, "text") else str(event.get("text", ""))
+    if not text.strip():
+        return {"action": "skip", "reason": "empty message"}
+    return None
+
+
+async def _on_session_end_hook(
+    session_id: str,
+    completed: bool,
+    interrupted: bool,
+    model: str | None,
+    platform: str,
+    reason: str,
+    task_id: str,
+    turn_id: str,
+    api_request_id: str,
+    **kwargs,
+) -> None:
+    _schedule_post("session_end", text="", platform=platform, chat_id=session_id, user_id="")
+
+
+async def _on_session_finalize_hook(session_id: str, platform: str, reason: str, **kwargs) -> None:
+    _schedule_post("session_finalize", text="", platform=platform, chat_id=session_id, user_id="")
+
+
+async def _api_request_error_hook(
+    task_id: str,
+    turn_id: str,
+    api_request_id: str,
+    session_id: str,
+    platform: str,
+    model: str,
+    provider: str,
+    base_url: str,
+    api_mode: str,
+    api_call_count: int,
+    api_duration: float,
+    started_at: float,
+    ended_at: float,
+    status_code: int | None,
+    retry_count: int | None,
+    max_retries: int | None,
+    retryable: bool | None,
+    reason: str | None,
+    error: dict,
+    request: dict,
+    **kwargs,
+) -> None:
+    error_msg = error.get("message", "Unknown error") if isinstance(error, dict) else str(error)
+    _schedule_post("api_error", text=error_msg, platform=provider, chat_id=model, user_id="")
+
+
 def register(ctx: Any) -> None:
     """Plugin entry point — called by Hermes on startup."""
     logger.info("Body Bridge plugin loaded: registering hooks and middleware")
@@ -406,7 +560,19 @@ def register(ctx: Any) -> None:
     ctx.register_hook("post_llm_call", _post_llm_call_hook)
     ctx.register_middleware("llm_execution", _llm_execution_middleware)
 
+    ctx.register_hook("gateway_platform_event", _gateway_platform_event_hook)
+    ctx.register_hook("on_stream_start", _on_stream_start_hook)
+    ctx.register_hook("on_stream_delta", _on_stream_delta_hook)
+    ctx.register_hook("on_stream_end", _on_stream_end_hook)
+    ctx.register_hook("pre_gateway_dispatch", _pre_gateway_dispatch_hook)
+    ctx.register_hook("on_session_end", _on_session_end_hook)
+    ctx.register_hook("on_session_finalize", _on_session_finalize_hook)
+    ctx.register_hook("api_request_error", _api_request_error_hook)
+
     logger.info(
         "Body Bridge hooks/middleware registered: "
-        "post_gateway_admission, post_llm_call, llm_execution"
+        "post_gateway_admission, post_llm_call, gateway_platform_event, "
+        "on_stream_start, on_stream_delta, on_stream_end, "
+        "pre_gateway_dispatch, on_session_end, on_session_finalize, "
+        "api_request_error, llm_execution"
     )

@@ -468,12 +468,20 @@ class TestRegister:
         with patch.object(bb._dispatcher, "_ensure_worker"):
             bb.register(mock_ctx)
 
-        assert mock_ctx.register_hook.call_count == 2
+        assert mock_ctx.register_hook.call_count == 10
         assert mock_ctx.register_middleware.call_count == 1
 
         hook_names = [call.args[0] for call in mock_ctx.register_hook.call_args_list]
         assert "post_gateway_admission" in hook_names
         assert "post_llm_call" in hook_names
+        assert "gateway_platform_event" in hook_names
+        assert "on_stream_start" in hook_names
+        assert "on_stream_delta" in hook_names
+        assert "on_stream_end" in hook_names
+        assert "pre_gateway_dispatch" in hook_names
+        assert "on_session_end" in hook_names
+        assert "on_session_finalize" in hook_names
+        assert "api_request_error" in hook_names
 
         middleware_name = mock_ctx.register_middleware.call_args.args[0]
         assert middleware_name == "llm_execution"

@@ -546,18 +546,26 @@ class TestRegisterIntegration:
     """Test plugin registration."""
 
     def test_register_calls_all_hooks(self):
-        """Test register() calls all three registration points."""
+        """Test register() calls all registration points."""
         mock_ctx = MagicMock()
 
         with patch.object(bb._dispatcher, "_ensure_worker"):
             bb.register(mock_ctx)
 
-        assert mock_ctx.register_hook.call_count == 2
+        assert mock_ctx.register_hook.call_count == 10
         assert mock_ctx.register_middleware.call_count == 1
 
         hooks = [c.args[0] for c in mock_ctx.register_hook.call_args_list]
         assert "post_gateway_admission" in hooks
         assert "post_llm_call" in hooks
+        assert "gateway_platform_event" in hooks
+        assert "on_stream_start" in hooks
+        assert "on_stream_delta" in hooks
+        assert "on_stream_end" in hooks
+        assert "pre_gateway_dispatch" in hooks
+        assert "on_session_end" in hooks
+        assert "on_session_finalize" in hooks
+        assert "api_request_error" in hooks
 
         middleware = mock_ctx.register_middleware.call_args.args[0]
         assert middleware == "llm_execution"

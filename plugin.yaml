@@ -5,6 +5,14 @@ author: "Erika"
 provides_hooks:
   - post_gateway_admission
   - post_llm_call
+  - gateway_platform_event
+  - on_stream_start
+  - on_stream_delta
+  - on_stream_end
+  - pre_gateway_dispatch
+  - on_session_end
+  - on_session_finalize
+  - api_request_error
 provides_middleware:
   - llm_execution
 config:
