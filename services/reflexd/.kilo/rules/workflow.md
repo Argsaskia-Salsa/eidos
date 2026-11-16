@@ -1,47 +1,108 @@
 # Workflow Rules for reflexd Changes
 
 ## Core Principle
-**Successful change = all tests pass + linter clean + coverage maintained**
+**Successful change = all tests pass + linter clean + type-check clean + coverage maintained**
+
+---
+
+## 0. Project Architecture & File Map
+
+| Module | Path | Responsibility |
+|--------|------|----------------|
+| **Registry** | `reflexd/registry.py` | Event handler registration (`on_event`, `get_handler`, `list_handlers`, `clear`). Global in-memory dict. |
+| **GatewayClient** | `reflexd/gateway_client.py` | MCP JSON-RPC client (aiohttp). `connect()`, `call(tool, args)`, `close()`. Applies safety clamps & rate limits for `move_head`. |
+| **Safety** | `reflexd/safety.py` | `clamp_move_head(yaw, pitch, speed)` → clamped tuple. `check_rate_limit()` → token bucket (3/sec, 1s window). |
+| **Server Handlers** | `reflexd/server.py` | MCP server endpoints: `handle_inject_event`, `handle_call`, `handle_list_reflexes`, `handle_list_gateway_tools`, `handle_reload_reflexes`, `handle_jsonrpc`, `health_check`. Uses `Registry` + `GatewayClient`. |
+| **Reflexes** | `reflexd/reflexes/` | Event implementations: `thinking.py`, `idle.py`, `greeting.py`. Decorated with `@on_event`. |
+| **Entrypoint** | `reflexd/main.py` | CLI, config, `REFLEXES_DIR`, `run_server()`. |
+| **Tools** | `reflexd/gateway_tools.py` | MCP tool definitions (`GATEWAY_TOOLS`). |
+| **Unit Tests** | `tests/unit/` | 7 files, 41 tests. One per module + reflexes. |
+| **Integration Tests** | `tests/integration/test_mcp_endpoints.py` | 15 tests against real aiohttp server. |
 
 ---
 
 ## 1. Testing (before changes)
 - [ ] Run existing tests: `pytest tests/ -v`
 - [ ] Check coverage: `pytest --cov=reflexd --cov-report=term-missing`
-- [ ] Record baseline: test count, coverage %, warnings
+- [ ] Run type check: `mypy reflexd` (or `pyright reflexd` if configured)
+- [ ] Record baseline: test count, coverage %, mypy errors
+
+---
 
 ## 2. Writing Tests (for new functionality)
 - [ ] Add unit tests for each new function/method
-- [ ] Add edge-case tests (None, empty strings, exceptions)
+- [ ] Add edge-case tests (`None`, empty strings, exceptions, boundary values)
 - [ ] Add regression tests for fixed bugs
-- [ ] Use mocks for external deps (HTTP gateway, aiohttp)
+- [ ] Use mocks for external deps (HTTP gateway, aiohttp) — see `conftest.py:mock_gateway_client`
 - [ ] Async tests: `@pytest.mark.asyncio` + proper async context manager mocks
+- [ ] Integration tests for new MCP endpoints/tools
 
-## 3. Making Changes
+---
+
+## 3. Code Style & Python 3.11+ Conventions
+- [ ] **Generics:** Use built-in `list[...]`, `dict[...]`, `tuple[...]`, `set[...]` (not `typing.List` etc.)
+- [ ] **Unions:** Prefer `X | None` over `Optional[X]`
+- [ ] **Data modeling:** Use `@dataclass` or Pydantic models instead of untyped `dict` for structured data
+- [ ] **Async I/O:** Never use blocking I/O (`time.sleep`, `requests`, file I/O) inside `async def` — use `asyncio.sleep`, `aiohttp`, `aiofiles`
+- [ ] **Logging:** Use `logging.getLogger(__name__)`; no `print()` in production code
+- [ ] **Exceptions:** Never bare `except Exception: pass` — always log or re-raise. Catch specific exceptions.
+- [ ] **Type hints:** Required for all new public functions/methods
+- [ ] **Docstrings:** Update for public API changes (Google/NumPy style)
+
+---
+
+## 4. Making Changes
 - [ ] Implement minimal necessary changes
 - [ ] Follow existing patterns (Registry, GatewayClient, safety, server handlers)
 - [ ] Add type hints for new functions
 - [ ] Update docstrings when changing public API
+- [ ] Run `mypy reflexd` after each logical change block
 
-## 4. Fixing to Pass Tests
+---
+
+## 5. Fixing to Pass Tests
 - [ ] Run tests after each logical change block
 - [ ] Fix only what breaks — no preventive refactoring
-- [ ] If test checks old behavior → update test, not code
+- [ ] **Update tests ONLY when business requirements explicitly change** — do NOT modify tests to match buggy new code
 - [ ] For async: mock `aiohttp.ClientSession.post` returning async context manager
+- [ ] If test fails due to your change and the test reflects correct expected behavior → fix the code, not the test
 
-## 5. Linter (ruff)
+---
+
+## 6. Linter (ruff)
 - [ ] `ruff check .` — must be 0 errors
 - [ ] `ruff format .` — auto-format
 - [ ] Config in `pyproject.toml`: line-length=100, target-version=py311
-- [ ] Ignores only for tests: `S101`, `T201`
+- [ ] Ignores only for tests: `S101` (assert), `T201` (print)
 
-## 6. Code Coverage
+---
+
+## 7. Static Type Checking (mypy)
+- [ ] `mypy reflexd` — must be 0 errors (configured in `pyproject.toml:tool.taskipy.tasks.typecheck`)
+- [ ] No `# type: ignore` or `# noqa` suppressions without explicit justification in PR/commit
+- [ ] Add missing stubs via `mypy --install-types` if needed
+
+---
+
+## 8. Strict Guardrails (LLM Prohibitions)
+| Prohibition | Rationale |
+|-------------|-----------|
+| ❌ Add new dependencies without explicit user approval | Keeps supply chain minimal; avoids version conflicts |
+| ❌ Suppress linter/type errors via `# noqa` or `# type: ignore` | Hides real issues; defeats automation |
+| ❌ Change public signatures of MCP handlers (`handle_*`), `Registry` (`on_event`, `get_handler`, `list_handlers`, `clear`), or `GatewayClient` (`connect`, `call`, `close`) without updating integration tests | Breaks MCP contract & external consumers |
+| ❌ Commit `# noqa: BLE001` or broad exception catches without logging | Swallows errors silently |
+
+---
+
+## 9. Code Coverage
 - [ ] `pytest --cov=reflexd --cov-report=term-missing`
-- [ ] Coverage must not drop below current (79%)
+- [ ] Coverage must not drop below **current baseline** (recorded in step 1)
 - [ ] New code must have tests
 - [ ] Document untestable paths (gateway connection, main entrypoint)
 
-## 7. Unit vs Regression Tests
+---
+
+## 10. Unit vs Regression vs Integration Tests
 | Type | When | Example |
 |------|------|---------|
 | Unit | New function/method | `clamp_move_head`, `check_rate_limit`, `handle_inject_event` |
@@ -49,10 +110,13 @@
 | Regression | Bug fixed | "rate limit not enforced", "handler overwrite warning" |
 | Integration | Real HTTP/MCP | `tests/integration/test_mcp_endpoints.py` |
 
-## 8. Final Check (Definition of Done)
-- [ ] `pytest tests/ -v` — **56 passed** (or more)
+---
+
+## 11. Final Check (Definition of Done)
+- [ ] `pytest tests/ -v` — **all tests pass** (baseline + new)
 - [ ] `ruff check .` — **All checks passed**
-- [ ] `pytest --cov=reflexd` — **≥ 79%**
+- [ ] `mypy reflexd` — **Success: no issues found**
+- [ ] `pytest --cov=reflexd` — **≥ baseline coverage %**
 - [ ] No new deprecation warnings
 - [ ] README/CHANGELOG updated when config/API changes
 
@@ -62,7 +126,7 @@
 ```bash
 # Full cycle
 cd C:\Development\Erika\eidos\services\reflexd
-pytest tests/ -v && ruff check . && pytest --cov=reflexd --cov-report=term-missing
+pytest tests/ -v && ruff check . && mypy reflexd && pytest --cov=reflexd --cov-report=term-missing
 ```
 
 ## Change History
