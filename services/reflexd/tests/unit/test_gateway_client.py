@@ -212,3 +212,58 @@ class TestGatewayClient:
         mock_session.close.assert_called_once()
         assert gateway_client.session is None
         assert gateway_client.session_id is None
+
+    @pytest.mark.asyncio
+    async def test_initialize_raises_when_session_not_created(self, gateway_client):
+        gateway_client.session = None
+
+        with pytest.raises(RuntimeError, match="Session not created"):
+            await gateway_client._initialize()
+
+    @pytest.mark.asyncio
+    async def test_call_raises_when_not_connected(self, gateway_client):
+        gateway_client.session = None
+        gateway_client.session_id = None
+
+        with pytest.raises(RuntimeError, match="Not connected to gateway"):
+            await gateway_client.call("set_avatar", {"face": "happy"})
+
+        gateway_client.session = AsyncMock()
+        gateway_client.session_id = None
+
+        with pytest.raises(RuntimeError, match="Not connected to gateway"):
+            await gateway_client.call("set_avatar", {"face": "happy"})
+
+        gateway_client.session = None
+        gateway_client.session_id = "test-session-id"
+
+        with pytest.raises(RuntimeError, match="Not connected to gateway"):
+            await gateway_client.call("set_avatar", {"face": "happy"})
+
+
+class TestGatewayClientModule:
+    def test_get_gateway_client_returns_none_by_default(self):
+        from reflexd.gateway_client import _gateway_client, get_gateway_client
+        original = _gateway_client
+        try:
+            import reflexd.gateway_client as gc
+            gc._gateway_client = None
+            assert get_gateway_client() is None
+        finally:
+            import reflexd.gateway_client as gc
+            gc._gateway_client = original
+
+    def test_set_gateway_client_sets_global(self):
+        from reflexd.gateway_client import (
+            _gateway_client,
+            get_gateway_client,
+            set_gateway_client,
+        )
+        original = _gateway_client
+        try:
+            mock_client = AsyncMock()
+            set_gateway_client(mock_client)
+            assert get_gateway_client() is mock_client
+        finally:
+            import reflexd.gateway_client as gc
+            gc._gateway_client = original
