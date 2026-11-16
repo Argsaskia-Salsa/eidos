@@ -76,7 +76,7 @@ async def handle_reload_reflexes(reflexes_dir: str) -> dict:
             continue
         module_name = py_file.stem
         try:
-            importlib.import_module(module_name)
+            importlib.import_module(f"reflexes.{module_name}")
             loaded.append(module_name)
         except Exception as e:
             errors.append({"module": module_name, "error": str(e)})

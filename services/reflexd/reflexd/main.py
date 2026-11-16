@@ -30,7 +30,7 @@ async def load_reflexes() -> None:
             continue
         module_name = py_file.stem
         try:
-            importlib.import_module(module_name)
+            importlib.import_module(f"reflexes.{module_name}")
             print(f"Loaded reflex: {module_name}")
         except Exception as e:
             print(f"Error loading reflex {module_name}: {e}")

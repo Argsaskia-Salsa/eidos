@@ -4,9 +4,32 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = ["aiohttp>=3.9"]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-mock",
+    "ruff",
+    "mypy",
+]
+
 [project.scripts]
 reflexd = "reflexd.main:main"
+
+[tool.taskipy.tasks]
+test = "pytest"
+test-cov = "pytest --cov=reflexd --cov-report=term-missing"
+lint = "ruff check ."
+typecheck = "mypy reflexd"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["reflexd*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
