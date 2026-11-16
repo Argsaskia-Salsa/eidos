@@ -1,7 +1,8 @@
-import pytest
 import warnings
 
-from reflexd.registry import on_event, get_handler, list_handlers, clear
+import pytest
+
+from reflexd.registry import clear, get_handler, list_handlers, on_event
 
 
 @pytest.fixture(autouse=True)
@@ -27,11 +28,11 @@ def test_on_event_overwrite_warns():
 
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        
+
         @on_event("test_event")
         async def handler2(data):
             return data
-        
+
         assert len(w) == 1
         assert "overwrit" in str(w[0].message).lower()
 

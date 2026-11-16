@@ -1,6 +1,8 @@
 import uuid
+
 import aiohttp
-from .safety import clamp_move_head, check_rate_limit
+
+from .safety import check_rate_limit, clamp_move_head
 
 
 class GatewayClient:
@@ -25,13 +27,13 @@ class GatewayClient:
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "reflexd", "version": "0.1.0"}
-            }
+                "clientInfo": {"name": "reflexd", "version": "0.1.0"},
+            },
         }
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.token}"
+            "Authorization": f"Bearer {self.token}",
         }
 
         async with self.session.post(self.url, json=request, headers=headers) as resp:
@@ -58,13 +60,13 @@ class GatewayClient:
             "jsonrpc": "2.0",
             "id": str(uuid.uuid4()),
             "method": "tools/call",
-            "params": {"name": tool, "arguments": args}
+            "params": {"name": tool, "arguments": args},
         }
 
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.token}",
-            "Mcp-Session-Id": self.session_id
+            "Mcp-Session-Id": self.session_id,
         }
 
         async with self.session.post(self.url, json=request, headers=headers) as resp:
@@ -85,8 +87,10 @@ class GatewayClient:
 
 _gateway_client: GatewayClient | None = None
 
+
 def get_gateway_client() -> GatewayClient | None:
     return _gateway_client
+
 
 def set_gateway_client(client: GatewayClient) -> None:
     global _gateway_client

@@ -1,4 +1,4 @@
-from reflexd import on_event, call
+from reflexd import call, on_event
 
 
 @on_event("user_message")

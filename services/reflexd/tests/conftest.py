@@ -1,9 +1,8 @@
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
-from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from reflexd.gateway_client import GatewayClient

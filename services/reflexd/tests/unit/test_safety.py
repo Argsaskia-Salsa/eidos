@@ -1,47 +1,47 @@
 import asyncio
 import time
-from unittest.mock import patch
 
 import pytest
 
-from reflexd.safety import clamp_move_head, check_rate_limit
+from reflexd.safety import check_rate_limit, clamp_move_head
 
 
 class TestClampMoveHead:
     def test_clamp_move_head_bounds_yaw(self):
-        yaw, pitch, speed = clamp_move_head(180, 45, 100)
+        yaw, _pitch, _speed = clamp_move_head(180, 45, 100)
         assert yaw == 90
 
-        yaw, pitch, speed = clamp_move_head(-180, 45, 100)
+        yaw, _pitch, _speed = clamp_move_head(-180, 45, 100)
         assert yaw == -90
 
-        yaw, pitch, speed = clamp_move_head(45, 45, 100)
+        yaw, _pitch, _speed = clamp_move_head(45, 45, 100)
         assert yaw == 45
 
     def test_clamp_move_head_bounds_pitch(self):
-        yaw, pitch, speed = clamp_move_head(0, 180, 100)
+        _yaw, pitch, _speed = clamp_move_head(0, 180, 100)
         assert pitch == 85
 
-        yaw, pitch, speed = clamp_move_head(0, -10, 100)
+        _yaw, pitch, _speed = clamp_move_head(0, -10, 100)
         assert pitch == 5
 
-        yaw, pitch, speed = clamp_move_head(0, 45, 100)
+        _yaw, pitch, _speed = clamp_move_head(0, 45, 100)
         assert pitch == 45
 
     def test_clamp_move_head_bounds_speed(self):
-        yaw, pitch, speed = clamp_move_head(0, 45, 500)
+        _yaw, _pitch, speed = clamp_move_head(0, 45, 500)
         assert speed == 200
 
-        yaw, pitch, speed = clamp_move_head(0, 45, 5)
+        _yaw, _pitch, speed = clamp_move_head(0, 45, 5)
         assert speed == 10
 
-        yaw, pitch, speed = clamp_move_head(0, 45, 150)
+        _yaw, _pitch, speed = clamp_move_head(0, 45, 150)
         assert speed == 150
 
 
 class TestCheckRateLimit:
     def setup_method(self):
         from reflexd.safety import _head_times
+
         _head_times.clear()
 
     def test_check_rate_limit_allows_under_limit(self):

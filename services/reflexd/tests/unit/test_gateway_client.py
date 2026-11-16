@@ -1,8 +1,6 @@
 import asyncio
-import uuid
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
-import aiohttp
 import pytest
 
 from reflexd.gateway_client import GatewayClient
@@ -169,7 +167,9 @@ class TestGatewayClient:
         gateway_client.session_id = "test-session-id"
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.json.return_value = {"error": {"code": -32603, "message": "Internal error"}}
+        mock_resp.json.return_value = {
+            "error": {"code": -32603, "message": "Internal error"}
+        }
         gateway_client.session.post = make_post_mock(mock_resp)
 
         with pytest.raises(RuntimeError, match="Tool error"):
@@ -191,10 +191,10 @@ class TestGatewayClient:
     async def test_call_timeout(self, gateway_client):
         gateway_client.session = AsyncMock()
         gateway_client.session_id = "test-session-id"
-        
+
         # Create a mock that raises TimeoutError when __aenter__ is called
         mock_cm = Mock()
-        mock_cm.__aenter__ = Mock(side_effect=asyncio.TimeoutError())
+        mock_cm.__aenter__ = Mock(side_effect=TimeoutError())
         mock_cm.__aexit__ = Mock(return_value=None)
         gateway_client.session.post = Mock(return_value=mock_cm)
 

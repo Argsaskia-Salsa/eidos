@@ -1,20 +1,19 @@
 import asyncio
 import sys
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from reflexd.gateway_client import GatewayClient
+from reflexd.gateway_tools import GATEWAY_TOOLS
 from reflexd.registry import clear
 from reflexd.server import (
-    handle_inject_event,
     handle_call,
-    handle_list_reflexes,
+    handle_inject_event,
     handle_list_gateway_tools,
+    handle_list_reflexes,
     handle_reload_reflexes,
 )
-from reflexd.gateway_tools import GATEWAY_TOOLS
 
 
 @pytest.fixture(autouse=True)
@@ -30,10 +29,12 @@ class TestHandleInjectEvent:
         mock_client = AsyncMock(spec=GatewayClient)
 
         with patch("reflexd.server.get_gateway_client", return_value=mock_client):
+
             async def handler(data):
                 return {"result": "ok"}
 
             from reflexd.registry import on_event
+
             on_event("test_event")(handler)
 
             result = await handle_inject_event("test_event", {"key": "value"})
@@ -57,6 +58,7 @@ class TestHandleInjectEvent:
                     raise
 
             from reflexd.registry import on_event
+
             on_event("test_event")(long_handler)
 
             task1 = asyncio.create_task(handle_inject_event("test_event", {}))
@@ -86,6 +88,7 @@ class TestHandleInjectEvent:
                 await asyncio.sleep(0.1)
 
             from reflexd.registry import on_event
+
             on_event("race_event")(handler)
 
             results = await asyncio.gather(
@@ -112,10 +115,12 @@ class TestHandleInjectEvent:
         mock_client = AsyncMock(spec=GatewayClient)
 
         with patch("reflexd.server.get_gateway_client", return_value=mock_client):
+
             async def failing_handler(data):
                 raise ValueError("test error")
 
             from reflexd.registry import on_event
+
             on_event("failing_event")(failing_handler)
 
             result = await handle_inject_event("failing_event", {})
@@ -136,9 +141,10 @@ class TestHandleCall:
 
     @pytest.mark.asyncio
     async def test_handle_call_raises_if_no_gateway(self):
-        with patch("reflexd.server.get_gateway_client", return_value=None):
-            with pytest.raises(RuntimeError, match="Gateway client not connected"):
-                await handle_call("set_avatar", {"face": "happy"})
+        with patch("reflexd.server.get_gateway_client", return_value=None), pytest.raises(
+            RuntimeError, match="Gateway client not connected"
+        ):
+            await handle_call("set_avatar", {"face": "happy"})
 
 
 class TestHandleListReflexes:
@@ -171,8 +177,12 @@ class TestHandleReloadReflexes:
         reflexes_dir = tmp_path / "reflexes"
         reflexes_dir.mkdir()
 
-        (reflexes_dir / "reflex1.py").write_text("from reflexd import on_event\n\n@on_event('test1')\nasync def h(d): pass\n")
-        (reflexes_dir / "reflex2.py").write_text("from reflexd import on_event\n\n@on_event('test2')\nasync def h(d): pass\n")
+        (reflexes_dir / "reflex1.py").write_text(
+            "from reflexd import on_event\n\n@on_event('test1')\nasync def h(d): pass\n"
+        )
+        (reflexes_dir / "reflex2.py").write_text(
+            "from reflexd import on_event\n\n@on_event('test2')\nasync def h(d): pass\n"
+        )
 
         # Add parent directory to sys.path so imports work (same as server.py does)
         sys.path.insert(0, str(reflexes_dir.parent))
@@ -188,8 +198,12 @@ class TestHandleReloadReflexes:
         reflexes_dir = tmp_path / "reflexes"
         reflexes_dir.mkdir()
 
-        (reflexes_dir / "_private.py").write_text("from reflexd import on_event\n\n@on_event('test')\nasync def h(d): pass\n")
-        (reflexes_dir / "public.py").write_text("from reflexd import on_event\n\n@on_event('test')\nasync def h(d): pass\n")
+        (reflexes_dir / "_private.py").write_text(
+            "from reflexd import on_event\n\n@on_event('test')\nasync def h(d): pass\n"
+        )
+        (reflexes_dir / "public.py").write_text(
+            "from reflexd import on_event\n\n@on_event('test')\nasync def h(d): pass\n"
+        )
 
         sys.path.insert(0, str(reflexes_dir.parent))
 
@@ -204,7 +218,9 @@ class TestHandleReloadReflexes:
         reflexes_dir = tmp_path / "reflexes"
         reflexes_dir.mkdir()
 
-        (reflexes_dir / "good.py").write_text("from reflexd import on_event\n\n@on_event('test')\nasync def h(d): pass\n")
+        (reflexes_dir / "good.py").write_text(
+            "from reflexd import on_event\n\n@on_event('test')\nasync def h(d): pass\n"
+        )
         (reflexes_dir / "bad.py").write_text("import nonexistent_module\n")
 
         sys.path.insert(0, str(reflexes_dir.parent))

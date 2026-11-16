@@ -1,6 +1,7 @@
 import asyncio
 import random
-from reflexd import on_event, call
+
+from reflexd import call, on_event
 
 
 @on_event("idle_tick")

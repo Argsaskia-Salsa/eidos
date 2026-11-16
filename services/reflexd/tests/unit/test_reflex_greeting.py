@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from reflexd.registry import clear, get_handler
 
@@ -14,10 +15,12 @@ def reset_registry():
 @pytest.mark.asyncio
 async def test_user_message_happy_yaw10():
     mock_call = AsyncMock()
-    
+
     with patch("reflexd.call", mock_call):
         import importlib
+
         import reflexes.greeting as greeting_module
+
         importlib.reload(greeting_module)
 
         handler = get_handler("user_message")
@@ -25,7 +28,7 @@ async def test_user_message_happy_yaw10():
         await handler({})
 
         assert mock_call.call_count == 2
-        
+
         avatar_call = None
         move_call = None
         for call_args in mock_call.call_args_list:
@@ -35,10 +38,10 @@ async def test_user_message_happy_yaw10():
                 avatar_call = params
             elif tool == "move_head":
                 move_call = params
-        
+
         assert avatar_call is not None
         assert avatar_call == {"face": "happy"}
-        
+
         assert move_call is not None
         assert move_call["yaw"] == 10
         assert move_call["pitch"] == 60
@@ -47,10 +50,12 @@ async def test_user_message_happy_yaw10():
 @pytest.mark.asyncio
 async def test_user_response_neutral_yaw0():
     mock_call = AsyncMock()
-    
+
     with patch("reflexd.call", mock_call):
         import importlib
+
         import reflexes.greeting as greeting_module
+
         importlib.reload(greeting_module)
 
         handler = get_handler("user_response")
@@ -58,7 +63,7 @@ async def test_user_response_neutral_yaw0():
         await handler({})
 
         assert mock_call.call_count == 2
-        
+
         avatar_call = None
         move_call = None
         for call_args in mock_call.call_args_list:
@@ -68,10 +73,10 @@ async def test_user_response_neutral_yaw0():
                 avatar_call = params
             elif tool == "move_head":
                 move_call = params
-        
+
         assert avatar_call is not None
         assert avatar_call == {"face": "neutral"}
-        
+
         assert move_call is not None
         assert move_call["yaw"] == 0
         assert move_call["pitch"] == 60

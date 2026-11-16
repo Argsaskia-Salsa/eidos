@@ -61,14 +61,17 @@ from reflexd import on_event, call
 import asyncio
 import random
 
+
 @on_event("user_message")
 async def on_user_message(event):
     await call("set_avatar", face="happy")
     await call("move_head", yaw=10, pitch=60)
 
+
 @on_event("thinking_start")
 async def on_thinking_start(event):
     await call("set_avatar", face="thinking")
+
 
 # Long-running reflex: runs until cancelled by next event of same type
 @on_event("idle_tick")
