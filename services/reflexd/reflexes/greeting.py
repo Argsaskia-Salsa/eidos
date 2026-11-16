@@ -1,0 +1,13 @@
+from reflexd import on_event, call
+
+
+@on_event("user_message")
+async def on_user_message(event):
+    await call("set_avatar", face="happy")
+    await call("move_head", yaw=10, pitch=60)
+
+
+@on_event("user_response")
+async def on_user_response(event):
+    await call("set_avatar", face="neutral")
+    await call("move_head", yaw=0, pitch=60)
