@@ -47,12 +47,21 @@ hermes plugins enable body_expression_bridge
 
 ### Method 2: Manual Installation (Directory-based)
 
-Since this is a directory-based Hermes plugin (not a pip package), copy the plugin folder to your Hermes plugins directory:
+Since this is a directory-based Hermes plugin (not a pip package), copy or symlink the plugin folder to your Hermes plugins directory:
 
-**Linux/macOS:**
+**Linux/macOS (copy):**
 ```bash
 # Copy the plugin directory to Hermes plugins folder
 cp -r body_expression_bridge ~/.hermes/plugins/
+
+# Enable the plugin
+hermes plugins enable body_expression_bridge
+```
+
+**Linux/macOS (symlink — recommended for development):**
+```bash
+# Symlink the plugin directory (changes are live, no need to re-copy)
+ln -sf /path/to/body_expression_bridge ~/.hermes/plugins/body_expression_bridge
 
 # Enable the plugin
 hermes plugins enable body_expression_bridge
