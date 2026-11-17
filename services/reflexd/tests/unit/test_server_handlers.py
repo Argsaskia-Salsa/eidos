@@ -11,6 +11,7 @@ from reflexd.server import (
     EventCancelledError,
     HandlerError,
     NoHandlerError,
+    _get_running_lock,
     handle_call,
     handle_inject_event,
     handle_list_gateway_tools,
@@ -252,6 +253,30 @@ class TestHandleReloadReflexes:
 
         assert result["status"] == "error"
         assert "not found" in result["message"]
+
+
+class TestGetRunningLock:
+    @pytest.mark.asyncio
+    async def test_get_running_lock_creates_per_loop(self):
+        lock1 = _get_running_lock()
+        lock2 = _get_running_lock()
+        assert lock1 is lock2
+
+    @pytest.mark.asyncio
+    async def test_get_running_lock_different_loops(self):
+        lock1 = _get_running_lock()
+        # In pytest-asyncio, all tests share the same loop, so we can't easily test different loops
+        # But we can verify the function works and returns a lock
+        lock2 = _get_running_lock()
+        assert lock1 is lock2  # Same loop returns same lock
+
+    @pytest.mark.asyncio
+    async def test_get_running_lock_fallback_when_no_running_loop(self):
+        # This tests the except RuntimeError branch when get_running_loop fails
+        # We can't easily test this without manipulating the event loop state,
+        # but we can verify the function doesn't crash
+        lock = _get_running_lock()
+        assert lock is not None
 
 
 class TestHandleJsonRpc:

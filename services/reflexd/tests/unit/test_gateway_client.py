@@ -1,9 +1,11 @@
 import asyncio
+import os
 from unittest.mock import AsyncMock, Mock, patch
 
+import aiohttp
 import pytest
 
-from reflexd.gateway_client import GatewayClient
+from reflexd.gateway_client import GatewayClient, _get_timeout
 from reflexd.safety import _head_times
 
 
@@ -239,6 +241,90 @@ class TestGatewayClient:
 
         with pytest.raises(RuntimeError, match="Not connected to gateway"):
             await gateway_client.call("set_avatar", {"face": "happy"})
+
+
+class TestGetTimeout:
+    def test_get_timeout_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            timeout = _get_timeout()
+            assert timeout.total == 10
+            assert timeout.connect == 5
+
+    def test_get_timeout_from_env_valid(self):
+        with patch.dict(os.environ, {"GATEWAY_TIMEOUT": "30"}):
+            timeout = _get_timeout()
+            assert timeout.total == 30
+            assert timeout.connect == 5.0
+
+    def test_get_timeout_from_env_small_value(self):
+        with patch.dict(os.environ, {"GATEWAY_TIMEOUT": "2"}):
+            timeout = _get_timeout()
+            assert timeout.total == 2
+            assert timeout.connect == 1.0
+
+    def test_get_timeout_from_env_invalid_falls_back(self):
+        with patch.dict(os.environ, {"GATEWAY_TIMEOUT": "invalid"}):
+            timeout = _get_timeout()
+            assert timeout.total == 10
+            assert timeout.connect == 5
+
+
+class TestConnectWithRetry:
+    @pytest.mark.asyncio
+    async def test_connect_with_retry_succeeds_on_first_attempt(self):
+        client = GatewayClient("http://test-gateway:8767/mcp", "test-token")
+        with patch.object(client, "connect", new_callable=AsyncMock) as mock_connect:
+            await client.connect_with_retry(max_attempts=3)
+            mock_connect.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_connect_with_retry_succeeds_after_failures(self):
+        client = GatewayClient("http://test-gateway:8767/mcp", "test-token")
+        mock_connect = AsyncMock()
+        mock_connect.side_effect = [
+            aiohttp.ClientError("Connection failed"),
+            aiohttp.ClientError("Connection failed"),
+            None,
+        ]
+        with patch.object(client, "connect", mock_connect), \
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await client.connect_with_retry(max_attempts=5, base_delay=0.01, max_delay=0.1)
+            assert mock_connect.call_count == 3
+            assert mock_sleep.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_connect_with_retry_exhausts_attempts(self):
+        client = GatewayClient("http://test-gateway:8767/mcp", "test-token")
+        mock_connect = AsyncMock()
+        mock_connect.side_effect = aiohttp.ClientError("Connection failed")
+        with patch.object(client, "connect", mock_connect), \
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with pytest.raises(RuntimeError, match="Failed to connect to gateway after 3 attempts"):
+                await client.connect_with_retry(max_attempts=3, base_delay=0.01, max_delay=0.1)
+            assert mock_connect.call_count == 3
+            assert mock_sleep.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_connect_with_retry_handles_oserror(self):
+        client = GatewayClient("http://test-gateway:8767/mcp", "test-token")
+        mock_connect = AsyncMock()
+        mock_connect.side_effect = OSError("Network error")
+        with patch.object(client, "connect", mock_connect), \
+             patch("asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(RuntimeError, match="Failed to connect to gateway after 2 attempts"):
+                await client.connect_with_retry(max_attempts=2, base_delay=0.01, max_delay=0.1)
+            assert mock_connect.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_connect_with_retry_handles_timeout_error(self):
+        client = GatewayClient("http://test-gateway:8767/mcp", "test-token")
+        mock_connect = AsyncMock()
+        mock_connect.side_effect = TimeoutError()
+        with patch.object(client, "connect", mock_connect), \
+             patch("asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(RuntimeError, match="Failed to connect to gateway after 2 attempts"):
+                await client.connect_with_retry(max_attempts=2, base_delay=0.01, max_delay=0.1)
+            assert mock_connect.call_count == 2
 
 
 class TestGatewayClientModule:

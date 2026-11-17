@@ -1,10 +1,18 @@
+import asyncio
+import json
 import logging
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from reflexd.main import _shutdown_event, load_reflexes, main
+from reflexd.main import (
+    JSONFormatter,
+    _shutdown_event,
+    load_reflexes,
+    main,
+    setup_logging,
+)
 from reflexd.registry import clear, list_handlers
 
 
@@ -76,6 +84,123 @@ class TestLoadReflexes:
             await load_reflexes()
 
         assert "Reflexes directory not found" in caplog.text
+
+
+class TestJSONFormatter:
+    def test_format_basic_log_record(self):
+        formatter = JSONFormatter()
+        record = logging.LogRecord(
+            name="test_logger",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=10,
+            msg="Test message",
+            args=(),
+            exc_info=None,
+        )
+        result = formatter.format(record)
+        data = json.loads(result)
+        assert data["level"] == "INFO"
+        assert data["logger"] == "test_logger"
+        assert data["message"] == "Test message"
+        assert "timestamp" in data
+        assert "exception" not in data
+
+    def test_format_with_exception(self):
+        formatter = JSONFormatter()
+        try:
+            raise ValueError("test error")
+        except ValueError:
+            exc_info = sys.exc_info()
+
+        record = logging.LogRecord(
+            name="test_logger",
+            level=logging.ERROR,
+            pathname="test.py",
+            lineno=10,
+            msg="Error occurred",
+            args=(),
+            exc_info=exc_info,
+        )
+        result = formatter.format(record)
+        data = json.loads(result)
+        assert data["level"] == "ERROR"
+        assert "exception" in data
+        assert "ValueError: test error" in data["exception"]
+
+
+class TestSetupLogging:
+    def test_setup_logging_text_format(self):
+        with patch.dict("os.environ", {"LOG_FORMAT": "text"}, clear=True), \
+             patch("logging.basicConfig") as mock_basic:
+            setup_logging()
+            mock_basic.assert_called_once()
+            _args, kwargs = mock_basic.call_args
+            assert kwargs["level"] == logging.INFO
+            assert len(kwargs["handlers"]) == 1
+
+    def test_setup_logging_json_format(self):
+        with patch.dict("os.environ", {"LOG_FORMAT": "json"}, clear=True), \
+             patch("logging.basicConfig") as mock_basic:
+            setup_logging()
+            mock_basic.assert_called_once()
+            _args, kwargs = mock_basic.call_args
+            assert kwargs["level"] == logging.INFO
+            assert len(kwargs["handlers"]) == 1
+            handler = kwargs["handlers"][0]
+            assert isinstance(handler.formatter, JSONFormatter)
+
+
+class TestShutdown:
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_running_tasks(self):
+        from reflexd.main import shutdown
+        from reflexd.server import _running
+
+        mock_client = AsyncMock()
+        mock_runner = AsyncMock()
+
+        task1 = asyncio.create_task(asyncio.sleep(10))
+        task2 = asyncio.create_task(asyncio.sleep(10))
+        _running["task1"] = task1
+        _running["task2"] = task2
+
+        await shutdown(mock_client, mock_runner)
+
+        mock_client.close.assert_called_once()
+        mock_runner.cleanup.assert_called_once()
+        assert _shutdown_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_main_signal_handler_not_implemented(self):
+        mock_client = AsyncMock()
+        mock_client.connect_with_retry = AsyncMock()
+        mock_client.close = AsyncMock()
+
+        mock_runner = AsyncMock()
+        mock_runner.setup = AsyncMock()
+        mock_runner.cleanup = AsyncMock()
+
+        mock_site = AsyncMock()
+        mock_site.start = AsyncMock()
+
+        mock_app = MagicMock()
+
+        with patch("reflexd.main.STACKCHAN_TOKEN", "test-token"), \
+             patch("reflexd.main.GatewayClient", return_value=mock_client), \
+             patch("reflexd.main.create_app", return_value=mock_app), \
+             patch("aiohttp.web.AppRunner", return_value=mock_runner), \
+             patch("aiohttp.web.TCPSite", return_value=mock_site), \
+             patch("asyncio.get_running_loop") as mock_get_loop, \
+             patch.object(_shutdown_event, "wait", side_effect=KeyboardInterrupt()):
+
+            mock_loop = MagicMock()
+            mock_loop.add_signal_handler.side_effect = NotImplementedError()
+            mock_get_loop.return_value = mock_loop
+
+            await main()
+
+            mock_client.connect_with_retry.assert_called_once()
 
 
 class TestMain:

@@ -1,8 +1,15 @@
 import asyncio
+import os
+from unittest.mock import patch
 
 import pytest
 
-from reflexd.safety import check_rate_limit, clamp_move_head
+from reflexd.safety import (
+    _get_rate_limit_config,
+    _head_times,
+    check_rate_limit,
+    clamp_move_head,
+)
 
 
 class TestClampMoveHead:
@@ -37,10 +44,34 @@ class TestClampMoveHead:
         assert speed == 150
 
 
+class TestGetRateLimitConfig:
+    def test_get_rate_limit_config_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            limit, window = _get_rate_limit_config()
+            assert limit == 3
+            assert window == 1.0
+
+    def test_get_rate_limit_config_from_env(self):
+        with patch.dict(os.environ, {"MOVE_HEAD_RATE_LIMIT": "5", "MOVE_HEAD_RATE_WINDOW": "2.0"}):
+            limit, window = _get_rate_limit_config()
+            assert limit == 5
+            assert window == 2.0
+
+    def test_get_rate_limit_config_invalid_limit_falls_back(self):
+        with patch.dict(os.environ, {"MOVE_HEAD_RATE_LIMIT": "invalid", "MOVE_HEAD_RATE_WINDOW": "1.0"}):
+            limit, window = _get_rate_limit_config()
+            assert limit == 3
+            assert window == 1.0
+
+    def test_get_rate_limit_config_invalid_window_falls_back(self):
+        with patch.dict(os.environ, {"MOVE_HEAD_RATE_LIMIT": "3", "MOVE_HEAD_RATE_WINDOW": "invalid"}):
+            limit, window = _get_rate_limit_config()
+            assert limit == 3
+            assert window == 1.0
+
+
 class TestCheckRateLimit:
     def setup_method(self):
-        from reflexd.safety import _head_times
-
         _head_times.clear()
 
     @pytest.mark.asyncio
