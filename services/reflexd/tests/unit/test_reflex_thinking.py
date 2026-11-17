@@ -36,9 +36,14 @@ async def test_thinking_start_sets_avatar_and_starts_loops():
         avatar_call = next(c for c in calls if c.args[0] == "set_avatar")
         assert avatar_call.kwargs == {"face": "thinking"}
 
+        # Should set RED LEDs at start
+        led_call = next((c for c in calls if c.args[0] == "set_all_leds"), None)
+        assert led_call is not None
+        assert led_call.kwargs == {"r": 255, "g": 0, "b": 0}
+
 
 @pytest.mark.asyncio
-async def test_thinking_end_sets_neutral_and_stops_loops():
+async def test_thinking_end_sets_happy_and_green_then_neutral_after_delay():
     mock_call = AsyncMock()
 
     with patch("reflexd.call", mock_call):
@@ -52,18 +57,21 @@ async def test_thinking_end_sets_neutral_and_stops_loops():
         assert handler is not None
         await handler({})
 
-        # Should call set_avatar(face="neutral") and clear_leds and move_head(yaw=0)
+        # Should call set_avatar(face="happy") and set_all_leds(green)
         calls = mock_call.call_args_list
         tools_called = [c.args[0] for c in calls]
         assert "set_avatar" in tools_called
-        assert "clear_leds" in tools_called
-        assert "move_head" in tools_called
+        assert "set_all_leds" in tools_called
 
-        # Find the set_avatar call
+        # Find the set_avatar call - should be happy, not neutral
         avatar_call = next(c for c in calls if c.args[0] == "set_avatar")
-        assert avatar_call.kwargs == {"face": "neutral"}
+        assert avatar_call.kwargs == {"face": "happy"}
 
-        # Find the move_head call - should return to center
-        move_call = next(c for c in calls if c.args[0] == "move_head")
-        assert move_call.kwargs["yaw"] == 0
-        assert move_call.kwargs["pitch"] == 12  # DEFAULT_PITCH
+        # Find the set_all_leds call - should be GREEN (0, 255, 0)
+        led_call = next(c for c in calls if c.args[0] == "set_all_leds")
+        assert led_call.kwargs == {"r": 0, "g": 255, "b": 0}
+
+        # clear_leds should NOT be called immediately - it happens after 60s delay
+        assert "clear_leds" not in tools_called
+        # move_head is called in the cancelled task's handler, not synchronously
+        assert "move_head" not in tools_called
