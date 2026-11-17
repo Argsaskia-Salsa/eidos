@@ -3,7 +3,7 @@ import random
 
 from reflexd import call, on_event
 
-DEFAULT_PITCH = 60
+DEFAULT_PITCH = 12
 
 
 @on_event("idle_tick")

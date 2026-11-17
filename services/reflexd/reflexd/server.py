@@ -132,8 +132,12 @@ async def handle_reload_reflexes(reflexes_dir: str) -> dict:
         if py_file.name.startswith("_"):
             continue
         module_name = py_file.stem
+        full_module_name = f"reflexes.{module_name}"
         try:
-            importlib.import_module(f"reflexes.{module_name}")
+            # Remove from sys.modules to force re-import and re-execute decorators
+            if full_module_name in sys.modules:
+                del sys.modules[full_module_name]
+            importlib.import_module(full_module_name)
             loaded.append(module_name)
         except (ImportError, ModuleNotFoundError, SyntaxError) as e:
             errors.append({"module": module_name, "error": str(e)})

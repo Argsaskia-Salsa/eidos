@@ -83,6 +83,7 @@ class GatewayClient:
 
         headers = {
             "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
             "Authorization": f"Bearer {self.token}",
         }
 
@@ -121,6 +122,7 @@ class GatewayClient:
 
             headers = {
                 "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
                 "Authorization": f"Bearer {self.token}",
                 "Mcp-Session-Id": session_id,
             }

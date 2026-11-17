@@ -64,8 +64,11 @@ async def load_reflexes() -> None:
         if py_file.name.startswith("_"):
             continue
         module_name = py_file.stem
+        full_module_name = f"reflexes.{module_name}"
         try:
-            importlib.import_module(f"reflexes.{module_name}")
+            if full_module_name in sys.modules:
+                del sys.modules[full_module_name]
+            importlib.import_module(full_module_name)
             logger.info("Loaded reflex: %s", module_name)
         except (ImportError, ModuleNotFoundError, SyntaxError) as e:
             logger.error("Error loading reflex %s: %s", module_name, e)
@@ -105,7 +108,7 @@ async def main() -> None:
     app = create_app()
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", REFLEXD_MCP_PORT)
+    site = web.TCPSite(runner, "0.0.0.0", REFLEXD_MCP_PORT, reuse_address=True, reuse_port=True)
     await site.start()
     logger.info("Reflexd MCP server running on port %d", REFLEXD_MCP_PORT)
 
