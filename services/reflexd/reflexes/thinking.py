@@ -6,21 +6,9 @@ from reflexd import call, on_event
 DEFAULT_PITCH = 12
 THINKING_YAW_RANGE = (-45, 45)
 THINKING_PITCH_RANGE = (5, 25)
-HEAD_MOVE_INTERVAL = 3.0  # total time for one smooth movement (respects 3/sec rate limit)
+HEAD_MOVE_INTERVAL = 4.0  # total time for one smooth movement (respects 3/sec rate limit)
 HEAD_STEPS = 4
-LED_CYCLE_INTERVAL = 0.6  # respects 3/sec rate limit for set_leds
-
-# Rainbow colors for LED running effect
-RAINBOW_COLORS = [
-    (255, 0, 0),    # Red
-    (255, 127, 0),  # Orange
-    (255, 255, 0),  # Yellow
-    (0, 255, 0),    # Green
-    (0, 255, 255),  # Cyan
-    (0, 0, 255),    # Blue
-    (127, 0, 255),  # Purple
-    (255, 0, 255),  # Magenta
-]
+LED_CYCLE_INTERVAL = 0.8  # respects 3/sec rate limit for set_leds (1.25/sec + 1/sec = 2.25/sec)
 
 NUM_LEDS = 12
 
@@ -32,24 +20,51 @@ _current_yaw = 0.0
 _current_pitch = float(DEFAULT_PITCH)
 
 
-def _make_running_pattern(offset: int) -> list[dict]:
-    """Create a running chaser pattern with rainbow colors."""
+def _hsv_to_rgb(h: float, s: float, v: float) -> tuple[int, int, int]:
+    """Convert HSV to RGB (0-255). h in [0, 1), s,v in [0, 1]."""
+    h = h * 6.0
+    i = int(h)
+    f = h - i
+    p = v * (1 - s)
+    q = v * (1 - s * f)
+    t = v * (1 - s * (1 - f))
+
+    if i == 0:
+        r, g, b = v, t, p
+    elif i == 1:
+        r, g, b = q, v, p
+    elif i == 2:
+        r, g, b = p, v, t
+    elif i == 3:
+        r, g, b = p, q, v
+    elif i == 4:
+        r, g, b = t, p, v
+    else:
+        r, g, b = v, p, q
+
+    return (int(r * 255), int(g * 255), int(b * 255))
+
+
+def _make_flow_gradient(hue_offset: float) -> list[dict]:
+    """Create smooth rainbow gradient flowing across LED strip."""
     pattern = []
     for i in range(NUM_LEDS):
-        color_idx = (i + offset) % len(RAINBOW_COLORS)
-        r, g, b = RAINBOW_COLORS[color_idx]
+        # Hue varies along strip + global offset for animation
+        hue = (hue_offset + i / NUM_LEDS) % 1.0
+        r, g, b = _hsv_to_rgb(hue, 1.0, 1.0)  # full saturation, full brightness
         pattern.append({"index": i, "r": r, "g": g, "b": b})
     return pattern
 
 
-async def _running_led_loop() -> None:
-    """Run rainbow colors along the LED strip (chaser effect)."""
+async def _flow_led_loop() -> None:
+    """Smooth rainbow gradient flowing across LED strip."""
     try:
-        offset = 0
+        hue_offset = 0.0
+        hue_speed = 0.02  # cycles per frame
         while True:
-            pattern = _make_running_pattern(offset)
+            pattern = _make_flow_gradient(hue_offset)
             await call("set_leds", colors=pattern)
-            offset += 1
+            hue_offset = (hue_offset + hue_speed) % 1.0
             await asyncio.sleep(LED_CYCLE_INTERVAL)
     except asyncio.CancelledError:
         raise
@@ -139,8 +154,8 @@ async def on_thinking_start(_event):
     # Thinking face
     await call("set_avatar", face="thinking")
 
-    # Start running rainbow LED cycle
-    _led_task = asyncio.create_task(_running_led_loop())
+    # Start smooth flowing rainbow LED cycle
+    _led_task = asyncio.create_task(_flow_led_loop())
 
     # Start smooth head movement
     _current_yaw = 0.0
