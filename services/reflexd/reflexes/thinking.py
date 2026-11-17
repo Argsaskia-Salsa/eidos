@@ -6,8 +6,9 @@ from reflexd import call, on_event
 DEFAULT_PITCH = 12
 THINKING_YAW_RANGE = (-45, 45)
 THINKING_PITCH_RANGE = (5, 25)
-HEAD_MOVE_INTERVAL = 0.5  # smoother, more frequent updates
-LED_CYCLE_INTERVAL = 0.15
+HEAD_MOVE_INTERVAL = 3.0  # total time for one smooth movement (respects 3/sec rate limit)
+HEAD_STEPS = 4
+LED_CYCLE_INTERVAL = 0.6  # respects 3/sec rate limit for set_leds
 
 # Rainbow colors for LED running effect
 RAINBOW_COLORS = [
@@ -68,30 +69,32 @@ async def _smooth_thinking_head_loop() -> None:
             target_pitch = random.uniform(*THINKING_PITCH_RANGE)
 
             # Smooth interpolation over several steps
-            steps = 5
-            for i in range(1, steps + 1):
-                t = i / steps
+            step_delay = HEAD_MOVE_INTERVAL / HEAD_STEPS
+            for i in range(1, HEAD_STEPS + 1):
+                t = i / HEAD_STEPS
                 # Ease in-out for natural movement
                 eased = t * t * (3 - 2 * t)
                 interp_yaw = _current_yaw + (target_yaw - _current_yaw) * eased
                 interp_pitch = _current_pitch + (target_pitch - _current_pitch) * eased
 
                 await call("move_head", yaw=int(interp_yaw), pitch=int(interp_pitch))
-                await asyncio.sleep(HEAD_MOVE_INTERVAL / steps)
+                await asyncio.sleep(step_delay)
 
             _current_yaw = target_yaw
             _current_pitch = target_pitch
 
     except asyncio.CancelledError:
-        # Smooth return to center
+        # Smooth return to center - respect rate limit (3/sec = 0.33s min interval)
         steps = 10
+        return_delay = 3.5  # total time for return
+        step_delay = return_delay / steps
         for i in range(1, steps + 1):
             t = i / steps
             eased = t * t * (3 - 2 * t)
             interp_yaw = _current_yaw * (1 - eased)
             interp_pitch = _current_pitch + (DEFAULT_PITCH - _current_pitch) * eased
             await call("move_head", yaw=int(interp_yaw), pitch=int(interp_pitch))
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(step_delay)
         raise
 
 
@@ -100,7 +103,18 @@ async def _return_to_neutral_after_delay() -> None:
     try:
         await asyncio.sleep(60)
         await call("set_avatar", face="neutral")
-        await call("move_head", yaw=0, pitch=DEFAULT_PITCH)
+        # Smooth return to center - respect rate limit
+        steps = 10
+        return_delay = 3.5
+        step_delay = return_delay / steps
+        for i in range(1, steps + 1):
+            t = i / steps
+            eased = t * t * (3 - 2 * t)
+            interp_yaw = 0.0 * (1 - eased)  # from 0 to 0
+            interp_pitch = DEFAULT_PITCH + (DEFAULT_PITCH - DEFAULT_PITCH) * eased  # stays at DEFAULT_PITCH
+            # Actually just move directly since yaw is already 0
+            await call("move_head", yaw=0, pitch=DEFAULT_PITCH)
+            await asyncio.sleep(step_delay)
         await call("clear_leds")
     except asyncio.CancelledError:
         raise
