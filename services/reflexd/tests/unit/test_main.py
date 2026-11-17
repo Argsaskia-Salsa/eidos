@@ -1,9 +1,10 @@
+import logging
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from reflexd.main import load_reflexes, main
+from reflexd.main import _shutdown_event, load_reflexes, main
 from reflexd.registry import clear, list_handlers
 
 
@@ -56,44 +57,41 @@ class TestLoadReflexes:
         assert "private_event" not in list_handlers()
 
     @pytest.mark.asyncio
-    async def test_load_reflexes_handles_import_error(self, tmp_path, capsys):
+    async def test_load_reflexes_handles_import_error(self, tmp_path, caplog):
         reflexes_dir = tmp_path / "reflexes"
         reflexes_dir.mkdir()
 
         (reflexes_dir / "bad_reflex.py").write_text("import nonexistent_module\n")
 
-        with patch("reflexd.main.REFLEXES_DIR", str(reflexes_dir)):
+        with patch("reflexd.main.REFLEXES_DIR", str(reflexes_dir)), caplog.at_level(logging.ERROR):
             await load_reflexes()
 
-        captured = capsys.readouterr()
-        assert "Error loading reflex bad_reflex" in captured.out
+        assert "Error loading reflex bad_reflex" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_load_reflexes_warns_on_missing_directory(self, tmp_path, capsys):
+    async def test_load_reflexes_warns_on_missing_directory(self, tmp_path, caplog):
         nonexistent_dir = tmp_path / "nonexistent"
 
-        with patch("reflexd.main.REFLEXES_DIR", str(nonexistent_dir)):
+        with patch("reflexd.main.REFLEXES_DIR", str(nonexistent_dir)), caplog.at_level(logging.WARNING):
             await load_reflexes()
 
-        captured = capsys.readouterr()
-        assert "Warning: Reflexes directory not found" in captured.out
+        assert "Reflexes directory not found" in caplog.text
 
 
 class TestMain:
     @pytest.mark.asyncio
-    async def test_main_exits_when_token_not_set(self, capsys):
+    async def test_main_exits_when_token_not_set(self, caplog):
         with patch("reflexd.main.STACKCHAN_TOKEN", ""):
             with pytest.raises(SystemExit) as exc_info:
                 await main()
             assert exc_info.value.code == 1
 
-        captured = capsys.readouterr()
-        assert "Error: STACKCHAN_TOKEN not set in .env" in captured.out
+        assert "STACKCHAN_TOKEN not set in .env" in caplog.text
 
     @pytest.mark.asyncio
     async def test_main_connects_gateway_and_starts_server(self):
         mock_client = AsyncMock()
-        mock_client.connect = AsyncMock()
+        mock_client.connect_with_retry = AsyncMock()
         mock_client.close = AsyncMock()
 
         mock_runner = AsyncMock()
@@ -110,20 +108,20 @@ class TestMain:
              patch("reflexd.main.create_app", return_value=mock_app), \
              patch("aiohttp.web.AppRunner", return_value=mock_runner), \
              patch("aiohttp.web.TCPSite", return_value=mock_site), \
-             patch("asyncio.Event.wait", side_effect=KeyboardInterrupt()):
+             patch.object(_shutdown_event, "wait", side_effect=KeyboardInterrupt()):
 
             await main()
 
-        mock_client.connect.assert_called_once()
+        mock_client.connect_with_retry.assert_called_once()
         mock_runner.setup.assert_called_once()
         mock_site.start.assert_called_once()
         mock_client.close.assert_called_once()
         mock_runner.cleanup.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_main_exits_on_gateway_connection_failure(self, capsys):
+    async def test_main_exits_on_gateway_connection_failure(self, caplog):
         mock_client = AsyncMock()
-        mock_client.connect.side_effect = OSError("Connection failed")
+        mock_client.connect_with_retry.side_effect = RuntimeError("Failed to connect to gateway after 5 attempts: Connection failed")
 
         with patch("reflexd.main.STACKCHAN_TOKEN", "test-token"), \
              patch("reflexd.main.GatewayClient", return_value=mock_client), \
@@ -131,5 +129,4 @@ class TestMain:
             await main()
 
         assert exc_info.value.code == 1
-        captured = capsys.readouterr()
-        assert "Failed to connect to gateway: Connection failed" in captured.out
+        assert "Failed to connect to gateway" in caplog.text

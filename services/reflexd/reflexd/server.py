@@ -1,48 +1,101 @@
 import asyncio
 import importlib
 import sys
+import time
 from pathlib import Path
 
 import aiohttp
 from aiohttp import web
+from jsonschema import ValidationError, validate
 
 from .gateway_client import get_gateway_client
 from .gateway_tools import GATEWAY_TOOLS
 from .registry import clear, get_handler, list_handlers
 
 _running: dict[str, asyncio.Task] = {}
-_gateway_client_instance = None
+_start_time = time.time()
+
+
+class InjectEventError(Exception):
+    def __init__(self, code: int, message: str, event: str | None = None):
+        self.code = code
+        self.message = message
+        self.event = event
+        super().__init__(message)
+
+
+class NoHandlerError(InjectEventError):
+    def __init__(self, event: str):
+        super().__init__(-32601, f"No handler for event: {event}", event)
+
+
+class HandlerError(InjectEventError):
+    def __init__(self, event: str, error: str):
+        super().__init__(-32603, f"Handler error for event {event}: {error}", event)
+
+
+class EventCancelledError(InjectEventError):
+    def __init__(self, event: str):
+        super().__init__(-32000, f"Event cancelled: {event}", event)
+
+
+def _get_reflexes_dir() -> str:
+    from .main import REFLEXES_DIR
+    return REFLEXES_DIR
+
+
+def _validate_tool_arguments(tool_name: str, arguments: dict) -> None:
+    tool_schema = GATEWAY_TOOLS.get(tool_name)
+    if tool_schema:
+        try:
+            validate(instance=arguments, schema=tool_schema)
+        except ValidationError as e:
+            raise InjectEventError(-32602, f"Invalid arguments for tool '{tool_name}': {e.message}")
+
+
+_running_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_running_lock() -> asyncio.Lock:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+    loop_id = id(loop)
+    if loop_id not in _running_locks:
+        _running_locks[loop_id] = asyncio.Lock()
+    return _running_locks[loop_id]
 
 
 async def handle_inject_event(name: str, data: dict) -> dict:
-    global _gateway_client_instance
+    lock = _get_running_lock()
+    async with lock:
+        if name in _running:
+            _running[name].cancel()
+            try:
+                await _running[name]
+            except asyncio.CancelledError:
+                pass
 
-    if name in _running:
-        _running[name].cancel()
-        try:
-            await _running[name]
-        except asyncio.CancelledError:
-            pass
+        handler = get_handler(name)
+        if handler:
+            get_gateway_client()
 
-    handler = get_handler(name)
-    if handler:
-        client = get_gateway_client()
-        if client:
-            _gateway_client_instance = client
+            task = asyncio.create_task(handler(data))
+            _running[name] = task
+        else:
+            raise NoHandlerError(name)
 
-        task = asyncio.create_task(handler(data))
-        _running[name] = task
-        try:
-            await task
-            return {"status": "ok", "event": name}
-        except asyncio.CancelledError:
-            return {"status": "cancelled", "event": name}
-        except Exception as e:  # noqa: BLE001
-            return {"status": "error", "event": name, "error": str(e)}
-        finally:
+    try:
+        await task
+        return {"status": "ok", "event": name}
+    except asyncio.CancelledError:
+        raise EventCancelledError(name)
+    except Exception as e:  # noqa: BLE001
+        raise HandlerError(name, str(e))
+    finally:
+        async with lock:
             _running.pop(name, None)
-    else:
-        return {"status": "no_handler", "event": name}
 
 
 async def handle_call(tool: str, arguments: dict) -> dict:
@@ -125,24 +178,35 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
                 name = arguments.get("name")
                 data = arguments.get("data", {})
                 if not name:
-                    result = {"error": "Missing event name"}
-                else:
-                    result = await handle_inject_event(name, data)
+                    return web.json_response(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": {"code": -32602, "message": "Missing event name"},
+                        },
+                        status=400,
+                    )
+                result = await handle_inject_event(name, data)
             elif tool_name == "call":
                 tool = arguments.get("tool")
                 args = arguments.get("arguments", {})
                 if not tool:
-                    result = {"error": "Missing tool name"}
-                else:
-                    result = await handle_call(tool, args)
+                    return web.json_response(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": {"code": -32602, "message": "Missing tool name"},
+                        },
+                        status=400,
+                    )
+                _validate_tool_arguments(tool, args)
+                result = await handle_call(tool, args)
             elif tool_name == "list_reflexes":
                 result = await handle_list_reflexes()
             elif tool_name == "list_gateway_tools":
                 result = await handle_list_gateway_tools()
             elif tool_name == "reload_reflexes":
-                from .main import REFLEXES_DIR
-
-                result = await handle_reload_reflexes(REFLEXES_DIR)
+                result = await handle_reload_reflexes(_get_reflexes_dir())
             elif tool_name == "user_message":
                 result = await handle_inject_event(
                     "user_message", arguments.get("data", {})
@@ -160,7 +224,14 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
                     "thinking_end", arguments.get("data", {})
                 )
             else:
-                result = {"error": f"Unknown tool: {tool_name}"}
+                return web.json_response(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
+                    },
+                    status=404,
+                )
         else:
             return web.json_response(
                 {
@@ -172,6 +243,15 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
             )
 
         return web.json_response({"jsonrpc": "2.0", "id": req_id, "result": result})
+    except InjectEventError as e:
+        return web.json_response(
+            {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": e.code, "message": e.message},
+            },
+            status=500 if e.code == -32603 else 200,
+        )
     except Exception as e:  # noqa: BLE001
         return web.json_response(
             {
@@ -184,7 +264,20 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
 
 
 async def health_check(request: web.Request) -> web.Response:
-    return web.json_response({"status": "ok"})
+    client = get_gateway_client()
+    gateway_connected = (
+        client is not None
+        and getattr(client, "session", None) is not None
+        and getattr(client, "session_id", None) is not None
+    )
+    return web.json_response(
+        {
+            "status": "ok",
+            "gateway_connected": gateway_connected,
+            "reflexes_loaded": len(list_handlers()),
+            "uptime_seconds": time.time() - _start_time,
+        }
+    )
 
 
 def create_app() -> web.Application:

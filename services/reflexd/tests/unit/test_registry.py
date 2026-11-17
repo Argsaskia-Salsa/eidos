@@ -1,4 +1,4 @@
-import warnings
+import logging
 
 import pytest
 
@@ -21,20 +21,19 @@ def test_on_event_registers_handler():
     assert "test_event" in list_handlers()
 
 
-def test_on_event_overwrite_warns():
+def test_on_event_overwrite_warns(caplog):
     @on_event("test_event")
     async def handler1(data):
         return data
 
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-
+    with caplog.at_level(logging.WARNING):
         @on_event("test_event")
         async def handler2(data):
             return data
 
-        assert len(w) == 1
-        assert "overwrit" in str(w[0].message).lower()
+        assert len(caplog.records) == 1
+        assert "overwrit" in caplog.records[0].message.lower()
+        assert caplog.records[0].name == "reflexd.registry"
 
 
 def test_get_handler_returns_none_for_missing():

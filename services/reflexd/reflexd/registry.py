@@ -1,5 +1,7 @@
-import warnings
+import logging
 from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
 
 _handlers: dict[str, Callable] = {}
 
@@ -7,7 +9,7 @@ _handlers: dict[str, Callable] = {}
 def on_event(name: str):
     def deco(fn: Callable):
         if name in _handlers:
-            warnings.warn(f"Overwriting handler for event: {name}", stacklevel=2)
+            logger.warning("Handler for event '%s' being overwritten", name)
         _handlers[name] = fn
         return fn
 

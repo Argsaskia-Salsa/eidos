@@ -8,6 +8,9 @@ from reflexd.gateway_client import GatewayClient
 from reflexd.gateway_tools import GATEWAY_TOOLS
 from reflexd.registry import clear
 from reflexd.server import (
+    EventCancelledError,
+    HandlerError,
+    NoHandlerError,
     handle_call,
     handle_inject_event,
     handle_list_gateway_tools,
@@ -72,7 +75,7 @@ class TestHandleInjectEvent:
 
             try:
                 await task1
-            except asyncio.CancelledError:
+            except EventCancelledError:
                 pass
 
     @pytest.mark.asyncio
@@ -95,9 +98,18 @@ class TestHandleInjectEvent:
                 handle_inject_event("race_event", {}),
                 handle_inject_event("race_event", {}),
                 handle_inject_event("race_event", {}),
+                return_exceptions=True,
             )
 
-            statuses = [r["status"] for r in results]
+            statuses = []
+            for r in results:
+                if isinstance(r, EventCancelledError):
+                    statuses.append("cancelled")
+                elif isinstance(r, dict):
+                    statuses.append(r.get("status", "unknown"))
+                else:
+                    statuses.append("error")
+
             assert "ok" in statuses
             assert "cancelled" in statuses
 
@@ -106,9 +118,9 @@ class TestHandleInjectEvent:
         mock_client = AsyncMock(spec=GatewayClient)
 
         with patch("reflexd.server.get_gateway_client", return_value=mock_client):
-            result = await handle_inject_event("nonexistent", {})
-            assert result["status"] == "no_handler"
-            assert result["event"] == "nonexistent"
+            with pytest.raises(NoHandlerError) as exc_info:
+                await handle_inject_event("nonexistent", {})
+            assert exc_info.value.event == "nonexistent"
 
     @pytest.mark.asyncio
     async def test_handle_inject_event_handler_error(self):
@@ -123,9 +135,10 @@ class TestHandleInjectEvent:
 
             on_event("failing_event")(failing_handler)
 
-            result = await handle_inject_event("failing_event", {})
-            assert result["status"] == "error"
-            assert "test error" in result["error"]
+            with pytest.raises(HandlerError) as exc_info:
+                await handle_inject_event("failing_event", {})
+            assert exc_info.value.event == "failing_event"
+            assert "test error" in exc_info.value.message
 
 
 class TestHandleCall:
@@ -260,10 +273,11 @@ class TestHandleJsonRpc:
         from reflexd.server import handle_jsonrpc
         resp = await handle_jsonrpc(request)
 
-        assert resp.status == 200
+        assert resp.status == 400
         data = json.loads(resp.text)
-        assert "error" in data["result"]
-        assert "Missing event name" in data["result"]["error"]
+        assert "error" in data
+        assert data["error"]["code"] == -32602
+        assert "Missing event name" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_handle_jsonrpc_call_missing_tool(self):
@@ -283,10 +297,11 @@ class TestHandleJsonRpc:
         from reflexd.server import handle_jsonrpc
         resp = await handle_jsonrpc(request)
 
-        assert resp.status == 200
+        assert resp.status == 400
         data = json.loads(resp.text)
-        assert "error" in data["result"]
-        assert "Missing tool name" in data["result"]["error"]
+        assert "error" in data
+        assert data["error"]["code"] == -32602
+        assert "Missing tool name" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_handle_jsonrpc_user_response(self):

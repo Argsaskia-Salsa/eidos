@@ -5,9 +5,9 @@ Wants=eidos-gateway.service
 
 [Service]
 Type=simple
-WorkingDirectory=~/projects/eidos/services/reflexd
-EnvironmentFile=~/projects/eidos/services/reflexd/.env
-ExecStart=~/projects/eidos/services/reflexd/.venv/bin/python -m reflexd.main
+WorkingDirectory=%h/projects/eidos/services/reflexd
+EnvironmentFile=%h/projects/eidos/services/reflexd/.env
+ExecStart=%h/projects/eidos/services/reflexd/.venv/bin/python -m reflexd.main
 Restart=always
 RestartSec=5
 

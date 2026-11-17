@@ -1,5 +1,4 @@
 import asyncio
-import time
 
 import pytest
 
@@ -44,30 +43,33 @@ class TestCheckRateLimit:
 
         _head_times.clear()
 
-    def test_check_rate_limit_allows_under_limit(self):
-        assert check_rate_limit() is True
-        assert check_rate_limit() is True
-        assert check_rate_limit() is True
+    @pytest.mark.asyncio
+    async def test_check_rate_limit_allows_under_limit(self):
+        assert await check_rate_limit() is True
+        assert await check_rate_limit() is True
+        assert await check_rate_limit() is True
 
-    def test_check_rate_limit_blocks_over_limit(self):
-        check_rate_limit()
-        check_rate_limit()
-        check_rate_limit()
-        assert check_rate_limit() is False
+    @pytest.mark.asyncio
+    async def test_check_rate_limit_blocks_over_limit(self):
+        await check_rate_limit()
+        await check_rate_limit()
+        await check_rate_limit()
+        assert await check_rate_limit() is False
 
-    def test_check_rate_limit_resets_after_window(self):
-        check_rate_limit()
-        check_rate_limit()
-        check_rate_limit()
-        assert check_rate_limit() is False
+    @pytest.mark.asyncio
+    async def test_check_rate_limit_resets_after_window(self):
+        await check_rate_limit()
+        await check_rate_limit()
+        await check_rate_limit()
+        assert await check_rate_limit() is False
 
-        time.sleep(1.1)
-        assert check_rate_limit() is True
+        await asyncio.sleep(1.1)
+        assert await check_rate_limit() is True
 
     @pytest.mark.asyncio
     async def test_check_rate_limit_thread_safe(self):
         async def call_rate_limit():
-            return check_rate_limit()
+            return await check_rate_limit()
 
         results = await asyncio.gather(*[call_rate_limit() for _ in range(10)])
         true_count = sum(1 for r in results if r)

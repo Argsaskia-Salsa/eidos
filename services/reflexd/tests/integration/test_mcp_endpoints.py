@@ -45,7 +45,12 @@ class TestHealthEndpoint:
         resp = await client.get("/health")
         assert resp.status == 200
         data = await resp.json()
-        assert data == {"status": "ok"}
+        assert data["status"] == "ok"
+        assert "gateway_connected" in data
+        assert "reflexes_loaded" in data
+        assert "uptime_seconds" in data
+        assert isinstance(data["uptime_seconds"], (int, float))
+        assert data["uptime_seconds"] >= 0
 
 
 class TestJSONRPCErrors:
@@ -302,10 +307,11 @@ class TestToolsCall:
                 "id": 1,
             },
         )
-        assert resp.status == 200
+        assert resp.status == 404
         data = await resp.json()
-        assert "error" in data["result"]
-        assert "Unknown tool" in data["result"]["error"]
+        assert "error" in data
+        assert data["error"]["code"] == -32601
+        assert "Unknown tool" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_concurrent_inject_events(self, client, mock_gateway_client):
@@ -338,7 +344,10 @@ class TestToolsCall:
         for resp in responses:
             assert resp.status == 200
             data = await resp.json()
-            assert data["result"]["status"] in ("ok", "cancelled")
+            if "result" in data:
+                assert data["result"]["status"] in ("ok", "cancelled")
+            else:
+                assert "error" in data
 
 
 class TestReflexModuleTests:
