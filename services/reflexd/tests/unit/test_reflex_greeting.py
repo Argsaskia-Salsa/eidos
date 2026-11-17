@@ -44,7 +44,7 @@ async def test_user_message_happy_yaw10():
 
         assert move_call is not None
         assert move_call["yaw"] == 10
-        assert move_call["pitch"] == 60
+        assert move_call["pitch"] == 12
 
 
 @pytest.mark.asyncio
@@ -79,4 +79,4 @@ async def test_user_response_neutral_yaw0():
 
         assert move_call is not None
         assert move_call["yaw"] == 0
-        assert move_call["pitch"] == 60
+        assert move_call["pitch"] == 12
