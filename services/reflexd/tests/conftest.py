@@ -7,7 +7,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from reflexd.gateway_client import GatewayClient
 from reflexd.registry import clear
-from reflexd.server import create_app
+from reflexd.server import _running, create_app
 
 
 @pytest.fixture
@@ -40,6 +40,7 @@ def temp_reflexes_dir(tmp_path):
 @pytest.fixture
 def app():
     clear()
+    _running.clear()
     return create_app()
 
 

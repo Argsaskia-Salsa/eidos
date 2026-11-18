@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import logging
 import sys
 import time
 from pathlib import Path
@@ -10,9 +11,26 @@ from jsonschema import ValidationError, validate
 
 from .gateway_client import get_gateway_client
 from .gateway_tools import GATEWAY_TOOLS
-from .registry import clear, get_handler, list_handlers
+from .registry import (
+    clear,
+    get_cleanup,
+    get_handler,
+    get_metadata,
+    list_handlers,
+)
 
-_running: dict[str, asyncio.Task] = {}
+logger = logging.getLogger(__name__)
+
+from typing import TypedDict
+
+
+class RunningEntry(TypedDict):
+    task: asyncio.Task
+    priority: int
+    conflict_group: str | None
+
+
+_running: dict[str, RunningEntry] = {}
 _start_time = time.time()
 
 
@@ -67,22 +85,75 @@ def _get_running_lock() -> asyncio.Lock:
     return _running_locks[loop_id]
 
 
+async def cancel_reflex(name: str) -> bool:
+    """Cancel a specific running reflex by name, run its cleanup."""
+    lock = _get_running_lock()
+    async with lock:
+        entry = _running.pop(name, None)
+    if entry:
+        entry["task"].cancel()
+        try:
+            await entry["task"]
+        except asyncio.CancelledError:
+            pass
+        cleanup = get_cleanup(name)
+        if cleanup:
+            try:
+                await cleanup()
+            except Exception:
+                logger.exception("Cleanup failed for %s", name)
+        return True
+    return False
+
+
 async def handle_inject_event(name: str, data: dict) -> dict:
     lock = _get_running_lock()
     async with lock:
         if name in _running:
-            _running[name].cancel()
+            _running[name]["task"].cancel()
             try:
-                await _running[name]
+                await _running[name]["task"]
             except asyncio.CancelledError:
                 pass
+
+        meta = get_metadata(name)
+        new_priority = meta.get("priority", 0)
+        new_conflict_group = meta.get("conflict_group")
+
+        to_cancel = []
+        for running_name, entry in _running.items():
+            entry_priority = entry["priority"]
+            entry_group = entry["conflict_group"]
+            should_cancel = False
+            if new_conflict_group and entry_group == new_conflict_group or new_priority > entry_priority:
+                should_cancel = True
+            if should_cancel:
+                to_cancel.append(running_name)
+
+        for running_name in to_cancel:
+            entry = _running.pop(running_name)
+            entry["task"].cancel()
+            try:
+                await entry["task"]
+            except asyncio.CancelledError:
+                pass
+            cleanup = get_cleanup(running_name)
+            if cleanup:
+                try:
+                    await cleanup()
+                except Exception:
+                    logger.exception("Cleanup failed for %s", running_name)
 
         handler = get_handler(name)
         if handler:
             get_gateway_client()
 
             task = asyncio.create_task(handler(data))
-            _running[name] = task
+            _running[name] = {
+                "task": task,
+                "priority": new_priority,
+                "conflict_group": new_conflict_group,
+            }
         else:
             raise NoHandlerError(name)
 
@@ -91,7 +162,7 @@ async def handle_inject_event(name: str, data: dict) -> dict:
         return {"status": "ok", "event": name}
     except asyncio.CancelledError:
         raise EventCancelledError(name)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 - catch all handler errors for MCP response
         raise HandlerError(name, str(e))
     finally:
         async with lock:
@@ -134,7 +205,6 @@ async def handle_reload_reflexes(reflexes_dir: str) -> dict:
         module_name = py_file.stem
         full_module_name = f"reflexes.{module_name}"
         try:
-            # Remove from sys.modules to force re-import and re-execute decorators
             if full_module_name in sys.modules:
                 del sys.modules[full_module_name]
             importlib.import_module(full_module_name)
@@ -227,6 +297,23 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
                 result = await handle_inject_event(
                     "thinking_end", arguments.get("data", {})
                 )
+            elif tool_name == "cancel_reflex":
+                reflex_name = arguments.get("name")
+                if not reflex_name:
+                    return web.json_response(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": {"code": -32602, "message": "Missing reflex name"},
+                        },
+                        status=400,
+                    )
+                success = await cancel_reflex(reflex_name)
+                result = {"status": "ok", "cancelled": success}
+            elif tool_name == "list_running_reflexes":
+                lock = _get_running_lock()
+                async with lock:
+                    result = {"running": list(_running.keys())}
             else:
                 return web.json_response(
                     {
@@ -256,7 +343,7 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
             },
             status=500 if e.code == -32603 else 200,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 - catch all unexpected errors for MCP response
         return web.json_response(
             {
                 "jsonrpc": "2.0",

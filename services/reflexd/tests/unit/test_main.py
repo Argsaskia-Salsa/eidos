@@ -162,8 +162,8 @@ class TestShutdown:
 
         task1 = asyncio.create_task(asyncio.sleep(10))
         task2 = asyncio.create_task(asyncio.sleep(10))
-        _running["task1"] = task1
-        _running["task2"] = task2
+        _running["task1"] = {"task": task1, "priority": 0, "conflict_group": None}
+        _running["task2"] = {"task": task2, "priority": 0, "conflict_group": None}
 
         await shutdown(mock_client, mock_runner)
 

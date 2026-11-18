@@ -85,4 +85,15 @@ GATEWAY_TOOLS = {
         "properties": {},
         "additionalProperties": False,
     },
+    "cancel_reflex": {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+        "required": ["name"],
+        "additionalProperties": False,
+    },
+    "list_running_reflexes": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
 }

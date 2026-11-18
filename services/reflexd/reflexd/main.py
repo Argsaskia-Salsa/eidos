@@ -76,10 +76,10 @@ async def load_reflexes() -> None:
 
 async def shutdown(client: GatewayClient, runner: web.AppRunner) -> None:
     logger.info("Shutting down...")
-    for task in _running.values():
-        task.cancel()
+    for entry in _running.values():
+        entry["task"].cancel()
         try:
-            await task
+            await entry["task"]
         except asyncio.CancelledError:
             pass
     await client.close()

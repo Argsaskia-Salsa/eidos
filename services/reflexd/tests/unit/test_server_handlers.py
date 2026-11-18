@@ -12,6 +12,7 @@ from reflexd.server import (
     HandlerError,
     NoHandlerError,
     _get_running_lock,
+    _running,
     handle_call,
     handle_inject_event,
     handle_list_gateway_tools,
@@ -23,8 +24,10 @@ from reflexd.server import (
 @pytest.fixture(autouse=True)
 def reset_registry():
     clear()
+    _running.clear()
     yield
     clear()
+    _running.clear()
 
 
 class TestHandleInjectEvent:
