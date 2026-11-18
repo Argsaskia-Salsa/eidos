@@ -1,5 +1,6 @@
 import asyncio
 import random
+
 from reflexd import call, on_cleanup, on_event, trigger_event
 
 DEFAULT_PITCH = 12

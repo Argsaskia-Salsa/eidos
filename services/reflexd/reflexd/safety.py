@@ -1,6 +1,3 @@
-import asyncio
-import os
-import time
 
 
 def clamp_move_head(yaw: int, pitch: int, speed: int = 100) -> tuple[int, int, int]:
