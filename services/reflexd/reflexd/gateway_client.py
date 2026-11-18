@@ -2,12 +2,13 @@ import asyncio
 import logging
 import os
 import random
+import time
 import uuid
 
 import aiohttp
 
 from .circuit_breaker import get_circuit_breaker
-from .safety import check_rate_limit, clamp_move_head
+from .safety import clamp_move_head
 
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=5)
 
@@ -23,6 +24,37 @@ def _get_timeout() -> aiohttp.ClientTimeout:
         except ValueError:
             pass
     return DEFAULT_TIMEOUT
+
+
+class RateLimiter:
+    def __init__(self, max_per_second: float = 3.0):
+        self.max_per_second = max_per_second
+        self.min_interval = 1.0 / max_per_second
+        self._last_call = 0.0
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            wait_time = self._last_call + self.min_interval - now
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            self._last_call = time.monotonic()
+
+
+def _get_rate_limit_config() -> tuple[float, float]:
+    try:
+        limit = float(os.getenv("RATE_LIMIT_COMBINED", "3"))
+    except ValueError:
+        limit = 3.0
+    try:
+        window = float(os.getenv("RATE_LIMIT_WINDOW", "1.0"))
+    except ValueError:
+        window = 1.0
+    return limit, window
+
+
+_rate_limiter = RateLimiter(_get_rate_limit_config()[0])
 
 
 class GatewayClient:
@@ -108,9 +140,10 @@ class GatewayClient:
             pitch = args.get("pitch", 60)
             speed = args.get("speed", 100)
             yaw, pitch, speed = clamp_move_head(yaw, pitch, speed)
-            if not await check_rate_limit():
-                raise RuntimeError("Rate limit exceeded for move_head (max 3/sec)")
             args = {"yaw": yaw, "pitch": pitch, "speed": speed}
+
+        if tool in ("move_head", "set_all_leds"):
+            await _rate_limiter.acquire()
 
         async def _do_call() -> dict:
             request = {

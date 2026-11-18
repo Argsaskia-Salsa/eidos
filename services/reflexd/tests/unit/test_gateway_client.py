@@ -1,17 +1,12 @@
 import asyncio
 import os
+import time
 from unittest.mock import AsyncMock, Mock, patch
 
 import aiohttp
 import pytest
 
 from reflexd.gateway_client import GatewayClient, _get_timeout
-from reflexd.safety import _head_times
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    _head_times.clear()
 
 
 @pytest.fixture
@@ -150,18 +145,69 @@ class TestGatewayClient:
 
     @pytest.mark.asyncio
     async def test_call_enforces_rate_limit(self, gateway_client):
-        gateway_client.session = AsyncMock()
+        from unittest.mock import Mock
+        gateway_client.session = Mock()
         gateway_client.session_id = "test-session-id"
 
-        for _ in range(3):
+        call_count = 0
+        mock_responses = []
+
+        for _ in range(4):
             mock_resp = AsyncMock()
             mock_resp.status = 200
             mock_resp.json.return_value = {"result": {}}
-            gateway_client.session.post = make_post_mock(mock_resp)
-            await gateway_client.call("move_head", {"yaw": 0, "pitch": 60})
+            mock_responses.append(MockAsyncContextManager(mock_resp))
 
-        with pytest.raises(RuntimeError, match="Rate limit exceeded"):
+        def make_post(*_args, **_kwargs):
+            nonlocal call_count
+            cm = mock_responses[call_count]
+            call_count += 1
+            return cm
+
+        gateway_client.session.post.side_effect = make_post
+
+        start = time.monotonic()
+        for _ in range(4):
             await gateway_client.call("move_head", {"yaw": 0, "pitch": 60})
+        elapsed = time.monotonic() - start
+
+        assert call_count == 4
+        min_interval = 1.0 / 3.0
+        assert elapsed >= 3 * min_interval * 0.9
+
+    @pytest.mark.asyncio
+    async def test_call_enforces_rate_limit_shared_across_tools(self, gateway_client):
+        from unittest.mock import Mock
+        gateway_client.session = Mock()
+        gateway_client.session_id = "test-session-id"
+
+        call_count = 0
+        mock_responses = []
+
+        for _ in range(4):
+            mock_resp = AsyncMock()
+            mock_resp.status = 200
+            mock_resp.json.return_value = {"result": {}}
+            mock_responses.append(MockAsyncContextManager(mock_resp))
+
+        def make_post(*_args, **_kwargs):
+            nonlocal call_count
+            cm = mock_responses[call_count]
+            call_count += 1
+            return cm
+
+        gateway_client.session.post.side_effect = make_post
+
+        start = time.monotonic()
+        await gateway_client.call("move_head", {"yaw": 0, "pitch": 60})
+        await gateway_client.call("set_all_leds", {"r": 255, "g": 0, "b": 0})
+        await gateway_client.call("move_head", {"yaw": 10, "pitch": 60})
+        await gateway_client.call("set_all_leds", {"r": 0, "g": 255, "b": 0})
+        elapsed = time.monotonic() - start
+
+        assert call_count == 4
+        min_interval = 1.0 / 3.0
+        assert elapsed >= 3 * min_interval * 0.9
 
     @pytest.mark.asyncio
     async def test_call_raises_on_gateway_error(self, gateway_client):
@@ -353,3 +399,46 @@ class TestGatewayClientModule:
         finally:
             import reflexd.gateway_client as gc
             gc._gateway_client = original
+
+
+class TestRateLimiter:
+    @pytest.mark.asyncio
+    async def test_rate_limiter_enforces_min_interval(self):
+        from reflexd.gateway_client import RateLimiter
+        limiter = RateLimiter(2.0)
+
+        start = time.monotonic()
+        await limiter.acquire()
+        await limiter.acquire()
+        await limiter.acquire()
+        elapsed = time.monotonic() - start
+
+        assert elapsed >= 0.9
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_first_call_no_delay(self):
+        from reflexd.gateway_client import RateLimiter
+        limiter = RateLimiter(10.0)
+
+        start = time.monotonic()
+        await limiter.acquire()
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.05
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_thread_safe(self):
+        from reflexd.gateway_client import RateLimiter
+        limiter = RateLimiter(100.0)
+
+        async def acquire_n(n):
+            for _ in range(n):
+                await limiter.acquire()
+
+        start = time.monotonic()
+        await asyncio.gather(acquire_n(10), acquire_n(10), acquire_n(10))
+        elapsed = time.monotonic() - start
+
+        min_interval = 1.0 / 100.0
+        expected_min = 29 * min_interval
+        assert elapsed >= expected_min * 0.9

@@ -76,7 +76,8 @@ async def load_reflexes() -> None:
 
 async def shutdown(client: GatewayClient, runner: web.AppRunner) -> None:
     logger.info("Shutting down...")
-    for entry in _running.values():
+    running_entries = list(_running.values())
+    for entry in running_entries:
         entry["task"].cancel()
         try:
             await entry["task"]
