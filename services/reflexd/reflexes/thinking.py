@@ -5,8 +5,8 @@ from reflexd import call, on_cleanup, on_event, trigger_event
 DEFAULT_PITCH = 12
 THINKING_YAW_RANGE = (-45, 45)
 THINKING_PITCH_RANGE = (5, 25)
-HEAD_MOVE_INTERVAL = 0.5
-LED_CYCLE_INTERVAL = 0.2
+HEAD_MOVE_INTERVAL = 4.0
+LED_CYCLE_INTERVAL = 2.0
 
 RAINBOW_COLORS = [
     (255, 0, 0),
