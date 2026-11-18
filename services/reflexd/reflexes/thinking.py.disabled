@@ -1,6 +1,5 @@
 import asyncio
 import random
-
 from reflexd import call, on_cleanup, on_event, trigger_event
 
 DEFAULT_PITCH = 12
@@ -9,16 +8,7 @@ THINKING_PITCH_RANGE = (5, 25)
 HEAD_MOVE_INTERVAL = 4.0
 LED_CYCLE_INTERVAL = 2.0
 
-RAINBOW_COLORS = [
-    (255, 0, 0),
-    (255, 127, 0),
-    (255, 255, 0),
-    (0, 255, 0),
-    (0, 255, 255),
-    (0, 0, 255),
-    (127, 0, 255),
-    (255, 0, 255),
-]
+NUM_LEDS = 12
 
 _thinking_task: asyncio.Task | None = None
 _led_task: asyncio.Task | None = None
@@ -28,13 +18,50 @@ _current_yaw = 0.0
 _current_pitch = float(DEFAULT_PITCH)
 
 
-async def _rainbow_led_loop() -> None:
-    idx = 0
-    while True:
-        color = RAINBOW_COLORS[idx % len(RAINBOW_COLORS)]
-        await call("set_all_leds", r=color[0], g=color[1], b=color[2])
-        idx += 1
-        await asyncio.sleep(LED_CYCLE_INTERVAL)
+def _hsv_to_rgb(h: float, s: float, v: float) -> tuple[int, int, int]:
+    """Convert HSV to RGB (0-255). h in [0, 1), s,v in [0, 1]."""
+    h = h * 6.0
+    i = int(h)
+    f = h - i
+    p = v * (1 - s)
+    q = v * (1 - s * f)
+    t = v * (1 - s * (1 - f))
+
+    if i == 0:
+        r, g, b = v, t, p
+    elif i == 1:
+        r, g, b = q, v, p
+    elif i == 2:
+        r, g, b = p, v, t
+    elif i == 3:
+        r, g, b = p, q, v
+    elif i == 4:
+        r, g, b = t, p, v
+    else:
+        r, g, b = v, p, q
+
+    return (int(r * 255), int(g * 255), int(b * 255))
+
+
+async def _flow_led_loop() -> None:
+    """Each LED has its own color, flowing rainbow wave along the strip."""
+    try:
+        hue_offset = 0.0
+        hue_speed = 0.02  # cycles per frame
+        while True:
+            # Create pattern: each LED gets its own hue, shifted by position + global offset
+            pattern = []
+            for i in range(NUM_LEDS):
+                # Each LED gets its own hue based on position + global animation offset
+                hue = (hue_offset + i / NUM_LEDS) % 1.0
+                r, g, b = _hsv_to_rgb(hue, 1.0, 1.0)
+                pattern.append({"index": i, "r": r, "g": g, "b": b})
+            
+            await call("set_leds", colors=pattern)
+            hue_offset = (hue_offset + hue_speed) % 1.0
+            await asyncio.sleep(LED_CYCLE_INTERVAL)
+    except asyncio.CancelledError:
+        raise
 
 
 async def _smooth_thinking_head_loop() -> None:
@@ -93,10 +120,11 @@ async def on_thinking_start(_event):
             except asyncio.CancelledError:
                 pass
 
+    # RED at start
     await call("set_all_leds", r=255, g=0, b=0)
     await call("set_avatar", face="thinking")
 
-    _led_task = asyncio.create_task(_rainbow_led_loop())
+    _led_task = asyncio.create_task(_flow_led_loop())
 
     _current_yaw = 0.0
     _current_pitch = (THINKING_PITCH_RANGE[0] + THINKING_PITCH_RANGE[1]) / 2
