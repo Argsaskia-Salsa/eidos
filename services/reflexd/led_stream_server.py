@@ -2,131 +2,31 @@
 """
 LED Stream Server: WebSocket (for gateway) + HTTP (for control).
 State stored in server. Controls: pattern, FPS, palette, brightness.
+Supports dynamic pattern loading from patterns/custom/ without restart.
 """
 
 import asyncio
 import json
 import os
-import time
 import signal
+import time
+from pathlib import Path
 from typing import AsyncGenerator, Optional
+
 from aiohttp import web
 import websockets
+
+from pattern_registry import (
+    PATTERNS, PATTERN_SPECS, _BUILTIN_PATTERNS as BUILTIN_PATTERNS,
+    reload_all_patterns, NUM_LEDS
+)
 
 
 # Configuration
 WS_HOST = os.getenv("WS_HOST", "0.0.0.0")
 WS_PORT = int(os.getenv("WS_PORT", "8772"))
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8773"))
-NUM_LEDS = 12
 DEFAULT_FPS = 20
-
-
-# ===== PATTERNS =====
-
-def pattern_cycle(num_leds: int = NUM_LEDS) -> list[list[list[int]]]:
-    """Sequential 1→2→...→N→1..."""
-    patterns = []
-    for i in range(num_leds):
-        colors = [[0, 0, 0] for _ in range(num_leds)]
-        colors[i] = [255, 255, 255]
-        patterns.append(colors)
-    return patterns
-
-
-def pattern_rainbow(num_leds: int = NUM_LEDS) -> list[list[list[int]]]:
-    """Flowing rainbow wave."""
-    import math
-    patterns = []
-    frames = 60
-    for frame in range(frames):
-        colors = []
-        for i in range(num_leds):
-            hue = (frame / frames + i / num_leds) % 1.0
-            h = hue * 6.0
-            x = int(h)
-            f = h - x
-            p = 1.0 * (1 - 1.0)
-            q = 1.0 * (1 - 1.0 * f)
-            t = 1.0 * (1 - 1.0 * (1 - f))
-            if x == 0:
-                r, g, b = 1.0, t, p
-            elif x == 1:
-                r, g, b = q, 1.0, p
-            elif x == 2:
-                r, g, b = p, 1.0, t
-            elif x == 3:
-                r, g, b = p, q, 1.0
-            elif x == 4:
-                r, g, b = t, p, 1.0
-            else:
-                r, g, b = 1.0, p, q
-            colors.append([int(r * 255), int(g * 255), int(b * 255)])
-        patterns.append(colors)
-    return patterns
-
-
-def pattern_breathing(num_leds: int = NUM_LEDS, color: list[int] = [0, 180, 255]) -> list[list[list[int]]]:
-    """All LEDs breathe together."""
-    import math
-    patterns = []
-    frames = 60
-    for frame in range(frames):
-        brightness = (math.sin(frame * 2 * math.pi / frames) + 1) / 2  # 0..1
-        colors = []
-        for _ in range(num_leds):
-            colors.append([int(c * brightness) for c in color])
-        patterns.append(colors)
-    return patterns
-
-
-def pattern_kitt(num_leds: int = NUM_LEDS, color: list[int] = [255, 0, 0], tail: float = 0.5) -> list[list[list[int]]]:
-    """KITT scanner back and forth."""
-    patterns = []
-    # Forward
-    for pos in range(num_leds):
-        colors = [[0, 0, 0] for _ in range(num_leds)]
-        for i in range(num_leds):
-            dist = abs(i - pos)
-            if dist == 0:
-                colors[i] = color[:]
-            elif dist <= 3:
-                fade = tail ** dist
-                colors[i] = [int(c * fade) for c in color]
-        patterns.append(colors)
-    # Backward
-    for pos in range(num_leds - 2, 0, -1):
-        colors = [[0, 0, 0] for _ in range(num_leds)]
-        for i in range(num_leds):
-            dist = abs(i - pos)
-            if dist == 0:
-                colors[i] = color[:]
-            elif dist <= 3:
-                fade = tail ** dist
-                colors[i] = [int(c * fade) for c in color]
-        patterns.append(colors)
-    return patterns
-
-
-def pattern_solid(num_leds: int = NUM_LEDS, color: list[int] = [255, 255, 255]) -> list[list[list[int]]]:
-    """Single solid color frame."""
-    return [[color[:] for _ in range(num_leds)]]
-
-
-def pattern_off(num_leds: int = NUM_LEDS) -> list[list[list[int]]]:
-    """All off."""
-    return [[[0, 0, 0] for _ in range(num_leds)]]
-
-
-# Pattern registry
-PATTERNS = {
-    "cycle": pattern_cycle,
-    "rainbow": pattern_rainbow,
-    "breathing": pattern_breathing,
-    "kitt": pattern_kitt,
-    "solid": pattern_solid,
-    "off": pattern_off,
-}
 
 
 # ===== SERVER STATE =====
@@ -146,7 +46,7 @@ class ServerState:
     def get_pattern(self) -> list:
         key = (self.pattern_name, json.dumps(self.pattern_args, sort_keys=True))
         if self._cache_key != key:
-            func = PATTERNS.get(self.pattern_name, pattern_cycle)
+            func = PATTERNS.get(self.pattern_name, PATTERNS["cycle"])
             self._pattern_cache = func(NUM_LEDS, **self.pattern_args)
             self._cache_key = key
             self.frame_count = 0
@@ -253,7 +153,7 @@ async def http_set_pattern(request):
 async def http_set_fps(request):
     try:
         data = await request.json()
-        fps = float(data.get("fps", DEFAULT_FPS))
+        fps = float(data.get("fps", 20))
         STATE.set_fps(fps)
         return web.json_response({"ok": True, "status": STATE.status()})
     except Exception as e:
@@ -272,10 +172,32 @@ async def http_set_brightness(request):
 
 async def http_list_patterns(request):
     return web.json_response({
-        "patterns": list(PATTERNS.keys()),
+        "patterns": [
+            {
+                "name": name,
+                "args": PATTERN_SPECS[name].args,
+                "description": PATTERN_SPECS[name].description,
+                "builtin": name in BUILTIN_PATTERNS
+            }
+            for name in PATTERNS.keys()
+        ],
         "current": STATE.pattern_name,
         "args": STATE.pattern_args
     })
+
+
+async def http_reload_patterns(request):
+    """Reload patterns from patterns/custom/ directory."""
+    try:
+        patterns = reload_all_patterns()
+        return web.json_response({
+            "ok": True,
+            "patterns": patterns,
+            "current": STATE.pattern_name,
+            "message": f"Reloaded {len(patterns)} patterns"
+        })
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
 
 
 # ===== MAIN =====
@@ -288,6 +210,7 @@ async def start_servers():
     app.router.add_post("/fps", http_set_fps)
     app.router.add_post("/brightness", http_set_brightness)
     app.router.add_get("/patterns", http_list_patterns)
+    app.router.add_post("/patterns/reload", http_reload_patterns)
     
     runner = web.AppRunner(app)
     await runner.setup()
@@ -303,7 +226,7 @@ async def start_servers():
     print(f"  Patterns: {list(PATTERNS.keys())}")
     print()
     
-    # Wait for shutdown
+    # SIGHUP handler for pattern reload (disabled - use HTTP /patterns/reload endpoint)
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
