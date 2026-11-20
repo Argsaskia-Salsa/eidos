@@ -19,7 +19,7 @@ import uuid
 GATEWAY_MCP_URL = os.getenv("GATEWAY_MCP_URL", "http://127.0.0.1:8767/mcp")
 STACKCHAN_TOKEN = os.getenv("STACKCHAN_TOKEN", "")
 # Use host IP since gateway runs in container/different namespace
-HOST_IP = os.getenv("HOST_IP", "192.168.x.x")
+HOST_IP = os.getenv("HOST_IP", "<YOUR_HOST_IP>")
 WS_SERVER_URL = os.getenv("WS_SERVER_URL", f"ws://{HOST_IP}:8772")
 TARGET = os.getenv("TARGET", "base_ring")  # base_ring, port_b, port_c
 MAX_FPS = float(os.getenv("MAX_FPS", "20"))

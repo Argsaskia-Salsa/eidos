@@ -1,0 +1,15 @@
+[Unit]
+Description=Eidos LED Stream Server
+After=network.target eidos-gateway.service
+Wants=eidos-gateway.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/eidos/services/reflexd
+EnvironmentFile=%h/projects/eidos/services/reflexd/.env
+ExecStart=%h/projects/eidos/services/reflexd/.venv/bin/python -m reflexd.streams.led
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

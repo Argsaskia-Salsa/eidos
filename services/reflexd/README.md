@@ -158,6 +158,127 @@ systemctl --user restart eidos-reflexd.service
 
 ---
 
+## LED Stream Service (reflexd.streams.led)
+
+LED streaming daemon: WebSocket server (port 8772) for gateway + HTTP control API (port 8773).
+Uses `stackchan_follow_led_stream` MCP tool to stream LED frames to the robot.
+
+### Prerequisites
+
+Same virtual environment as reflexd (shared `.venv` in `~/projects/eidos/services/reflexd`).
+
+**Required environment variables** (in `.env`):
+```env
+STACKCHAN_TOKEN=your-token          # Required for MCP stream_start/stop/status
+GATEWAY_MCP_URL=http://127.0.0.1:8767/mcp
+HOST_IP=<YOUR_HOST_IP>              # Host IP for gateway WebSocket connection
+```
+
+Optional (with defaults):
+```env
+WS_HOST=0.0.0.0
+WS_PORT=8772
+HTTP_PORT=8773
+NUM_LEDS=12
+DEFAULT_FPS=20
+DEFAULT_BRIGHTNESS=1.0
+COLOR_ORDER=grb
+TARGET=base_ring
+MAX_FPS=20
+```
+
+### Install and Run as systemd Service
+
+Create the service file:
+
+```bash
+SERVICE_DIR="$HOME/projects/eidos/services/reflexd"
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/eidos-led-stream.service <<EOF
+[Unit]
+Description=Eidos LED Stream Server
+After=network.target eidos-gateway.service
+Wants=eidos-gateway.service
+
+[Service]
+Type=simple
+WorkingDirectory=$SERVICE_DIR
+EnvironmentFile=$SERVICE_DIR/.env
+ExecStart=$SERVICE_DIR/.venv/bin/python -m reflexd.streams.led
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+```
+
+> **Note:** `After=network.target eidos-gateway.service` + `Wants=eidos-gateway.service` ensures the gateway is started first. The LED server connects to gateway via `stackchan_follow_led_stream` MCP tool.
+
+### Enable and Start
+
+```bash
+# Reload systemd configuration
+systemctl --user daemon-reload
+
+# Enable autostart and start service now
+systemctl --user enable --now eidos-led-stream.service
+```
+
+*(Optional)* To keep the service running after closing SSH session or user logout:
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+---
+
+## Update Service and Dependencies
+
+After pulling fresh changes from the repository (`git pull`) in `~/projects/eidos/services/reflexd`:
+
+1. **Update dependencies (if `pyproject.toml` changed):**
+   ```bash
+   .venv/bin/pip install -e .[dev]
+   ```
+
+2. **Restart the service:**
+   ```bash
+   systemctl --user restart eidos-led-stream.service
+   ```
+
+If the unit file changed:
+```bash
+systemctl --user daemon-reload
+systemctl --user restart eidos-led-stream.service
+```
+
+If `.env` changed:
+```bash
+systemctl --user restart eidos-led-stream.service
+```
+
+---
+
+## Management and Logs
+
+* **Check status:**
+  ```bash
+  systemctl --user status eidos-led-stream.service
+  ```
+
+* **Follow logs in real time:**
+  ```bash
+  journalctl --user -u eidos-led-stream.service -f
+  ```
+
+* **Stop and disable autostart:**
+  ```bash
+  systemctl --user disable --now eidos-led-stream.service
+  ```
+
+---
+
 ## LED Stream Package (reflexd.streams.led)
 
 Unified package for LED streaming: WebSocket (gateway) + HTTP (control) + MCP integration.
@@ -253,7 +374,7 @@ python -m reflexd.streams.led reload
 | `STACKCHAN_TOKEN`    | (required)                  | Bearer token for MCP           |
 | `TARGET`             | `base_ring`                 | LED target on robot            |
 | `MAX_FPS`            | `20`                        | Max FPS for gateway            |
-| `HOST_IP`            | `192.168.x.x`               | Host IP for gateway connection |
+| `HOST_IP`            | `<YOUR_HOST_IP>`               | Host IP for gateway connection |
 
 ### HTTP API
 
