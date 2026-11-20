@@ -158,23 +158,162 @@ systemctl --user restart eidos-reflexd.service
 
 ---
 
+## LED Stream Package (reflexd.streams.led)
+
+Unified package for LED streaming: WebSocket (gateway) + HTTP (control) + MCP integration.
+
+### Quick Start
+
+```bash
+# Start server (WS:8772, HTTP:8773)
+python -m reflexd.streams.led
+
+# CLI control
+python -m reflexd.streams.led pattern rainbow --color 255 0 0
+python -m reflexd.streams.led fps 30
+python -m reflexd.streams.led brightness 0.5
+python -m reflexd.streams.led start   # Connect to gateway via MCP
+python -m reflexd.streams.led status
+```
+
+### Architecture
+
+```
+┌─────────────┐     WebSocket      ┌──────────────────┐
+│   Gateway   │ ◄───────────────── │ LEDStreamServer  │
+│ (MCP tool)  │   frames @ FPS     │  (reflexd:8772)  │
+└──────┬──────┘                    └────────┬─────────┘
+       │                                    │
+       │ HTTP control                       │ HTTP control
+       ▼                                    ▼
+┌──────────────────┐              ┌──────────────────┐
+│ LEDStreamClient  │              │   HTTP API       │
+│ (MCP + HTTP)     │              │  /pattern, /fps  │
+└──────────────────┘              │  /brightness     │
+                                  │  /patterns       │
+                                  │  /patterns/reload│
+                                  └──────────────────┘
+```
+
+### Built-in Patterns
+
+| Pattern     | Description          | Args                            |
+|-------------|----------------------|---------------------------------|
+| `cycle`     | Sequential 1→2→...→N | —                               |
+| `rainbow`   | Flowing rainbow wave | —                               |
+| `breathing` | All LEDs breathe     | `color=[0,180,255]`             |
+| `kitt`      | KITT scanner         | `color=[255,0,0]`, `tail=0.5`   |
+| `solid`     | Single solid color   | `color=[255,255,255]`           |
+| `off`       | All LEDs off         | —                               |
+| `pulse`     | Pulse in/out         | `color=[255,100,0]`, `freq=1.0` |
+
+### Custom Patterns (Hot-Reloadable)
+
+Create `*.py` in `services/reflexd/reflexd/streams/led/patterns/custom/`:
+
+```python
+from reflexd.streams.led.registry import LEDPatternSpec
+
+def my_pattern(num_leds=12, color=[255,0,0], **kwargs):
+    # Return list[Frame] where Frame = list[list[int]] (LED x RGB)
+    frames = []
+    for i in range(num_leds):
+        colors = [[0,0,0] for _ in range(num_leds)]
+        colors[i] = color
+        frames.append(colors)
+    return frames
+
+PATTERN = LEDPatternSpec(
+    name="my_pattern",
+    func=my_pattern,
+    args={"color": [255,0,0]},
+    description="My custom pattern"
+)
+```
+
+Reload without restart:
+```bash
+curl -X POST http://localhost:8773/patterns/reload
+# or
+python -m reflexd.streams.led reload
+```
+
+### Configuration (Environment Variables)
+
+| Variable             | Default                     | Description                    |
+|----------------------|-----------------------------|--------------------------------|
+| `WS_HOST`            | `0.0.0.0`                   | WebSocket bind address         |
+| `WS_PORT`            | `8772`                      | WebSocket port                 |
+| `HTTP_PORT`          | `8773`                      | HTTP control port              |
+| `NUM_LEDS`           | `12`                        | Number of LEDs                 |
+| `DEFAULT_FPS`        | `20`                        | Default frame rate             |
+| `DEFAULT_BRIGHTNESS` | `1.0`                       | Default brightness (0.0-1.0)   |
+| `COLOR_ORDER`        | `grb`                       | LED color order                |
+| `GATEWAY_MCP_URL`    | `http://127.0.0.1:8767/mcp` | Gateway MCP endpoint           |
+| `STACKCHAN_TOKEN`    | (required)                  | Bearer token for MCP           |
+| `TARGET`             | `base_ring`                 | LED target on robot            |
+| `MAX_FPS`            | `20`                        | Max FPS for gateway            |
+| `HOST_IP`            | `192.168.x.x`               | Host IP for gateway connection |
+
+### HTTP API
+
+| Method | Endpoint           | Description                    |
+|--------|--------------------|--------------------------------|
+| GET    | `/status`          | Current state                  |
+| POST   | `/pattern`         | Set pattern `{pattern, args?}` |
+| POST   | `/fps`             | Set FPS `{fps}`                |
+| POST   | `/brightness`      | Set brightness `{brightness}`  |
+| GET    | `/patterns`        | List all patterns              |
+| POST   | `/patterns/reload` | Hot-reload custom patterns     |
+
+### MCP Integration
+
+`LEDStreamClient` provides MCP methods for `stackchan_follow_led_stream`:
+
+```python
+async with LEDStreamClient() as client:
+    await client.stream_start()   # Start WS stream via gateway
+    await client.stream_stop()    # Stop stream
+    status = await client.stream_status()
+```
+
+### Module Entrypoint
+
+```bash
+# Start server
+python -m reflexd.streams.led
+
+# CLI commands
+python -m reflexd.streams.led pattern rainbow --color 255 0 0
+python -m reflexd.streams.led fps 30
+python -m reflexd.streams.led brightness 0.5
+python -m reflexd.streams.led list
+python -m reflexd.streams.led reload
+python -m reflexd.streams.led start
+python -m reflexd.streams.led stop
+python -m reflexd.streams.led status
+python -m reflexd.streams.led monitor -i 2.0
+```
+
+---
+
 ## MCP Endpoint (reflexd :8770)
 
 The reflexd exposes a Streamable HTTP MCP endpoint at `http://127.0.0.1:8770/mcp` for Hermes bridge and direct calls.
 
 ### Tools
 
-| Tool | Args | Description |
-|------|------|-------------|
-| `inject_event` | `{name, data?}` | Main entry point from bridge |
-| `call` | `{tool, arguments}` | Direct gateway tool call |
-| `list_reflexes` | `{}` | Registered `@on_event` handlers |
-| `list_gateway_tools` | `{}` | Static `GATEWAY_TOOLS` schemas |
-| `reload_reflexes` | `{}` | Re-import `reflexes/*.py` |
-| `user_message` | `{data?}` | Convenience: `inject_event(name="user_message")` |
-| `user_response` | `{data?}` | Convenience: `inject_event(name="user_response")` |
-| `thinking_start` | `{data?}` | Convenience |
-| `thinking_end` | `{data?}` | Convenience |
+| Tool                 | Args                | Description                                       |
+|----------------------|---------------------|---------------------------------------------------|
+| `inject_event`       | `{name, data?}`     | Main entry point from bridge                      |
+| `call`               | `{tool, arguments}` | Direct gateway tool call                          |
+| `list_reflexes`      | `{}`                | Registered `@on_event` handlers                   |
+| `list_gateway_tools` | `{}`                | Static `GATEWAY_TOOLS` schemas                    |
+| `reload_reflexes`    | `{}`                | Re-import `reflexes/*.py`                         |
+| `user_message`       | `{data?}`           | Convenience: `inject_event(name="user_message")`  |
+| `user_response`      | `{data?}`           | Convenience: `inject_event(name="user_response")` |
+| `thinking_start`     | `{data?}`           | Convenience                                       |
+| `thinking_end`       | `{data?}`           | Convenience                                       |
 
 ### Quick Examples
 
@@ -240,13 +379,13 @@ async def on_idle(event):
 
 ### Built-in Reflexes (auto-loaded from `reflexes/`)
 
-| Event | Behavior |
-|-------|----------|
-| `thinking_start` | `set_avatar(face="thinking")` |
-| `thinking_end` | `set_avatar(face="neutral")` |
-| `user_message` | happy face + head yaw 10° |
-| `user_response` | neutral face + head yaw 0° |
-| `idle_tick` | random head sway (2–5s), returns to neutral on cancel |
+| Event            | Behavior                                              |
+|------------------|-------------------------------------------------------|
+| `thinking_start` | `set_avatar(face="thinking")`                         |
+| `thinking_end`   | `set_avatar(face="neutral")`                          |
+| `user_message`   | happy face + head yaw 10°                             |
+| `user_response`  | neutral face + head yaw 0°                            |
+| `idle_tick`      | random head sway (2–5s), returns to neutral on cancel |
 
 Add custom reflexes by creating `*.py` files in `reflexes/` — they auto-load on startup or via `reload_reflexes`.
 

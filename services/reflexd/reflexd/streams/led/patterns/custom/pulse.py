@@ -3,7 +3,7 @@ Example custom pattern: Pulse
 All LEDs pulse together at a configurable frequency.
 """
 
-from pattern_registry import PatternSpec
+from reflexd.streams.led.registry import LEDPatternSpec
 
 
 def pulse(num_leds: int = 12, color: list[int] = [255, 100, 0], freq: float = 1.0) -> list[list[list[int]]]:
@@ -22,7 +22,7 @@ def pulse(num_leds: int = 12, color: list[int] = [255, 100, 0], freq: float = 1.
 
 
 # Export pattern specification
-PATTERN = PatternSpec(
+PATTERN = LEDPatternSpec(
     name="pulse",
     func=pulse,
     args={"color": [255, 100, 0], "freq": 1.0},
