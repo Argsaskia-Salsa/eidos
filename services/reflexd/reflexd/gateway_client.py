@@ -137,7 +137,7 @@ class GatewayClient:
 
         if tool == "move_head":
             yaw = args.get("yaw", 0)
-            pitch = args.get("pitch", 60)
+            pitch = args.get("pitch", 12)
             speed = args.get("speed", 100)
             yaw, pitch, speed = clamp_move_head(yaw, pitch, speed)
             args = {"yaw": yaw, "pitch": pitch, "speed": speed}

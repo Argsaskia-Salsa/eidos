@@ -14,7 +14,9 @@ def reset_registry():
 
 @pytest.mark.asyncio
 async def test_thinking_start_sets_avatar_and_starts_loops():
+    """Test that thinking_start sets avatar to thinking and starts LED pattern."""
     mock_call = AsyncMock()
+    mock_led_client = AsyncMock()
 
     with patch("reflexd.call", mock_call):
         import importlib
@@ -23,23 +25,28 @@ async def test_thinking_start_sets_avatar_and_starts_loops():
 
         importlib.reload(thinking_module)
 
-        handler = get_handler("thinking_start")
-        assert handler is not None
-        await handler({})
+        # Patch LEDStreamClient in the reloaded module
+        with patch.object(thinking_module, "LEDStreamClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        # Should call set_avatar(face="thinking") at minimum
-        calls = mock_call.call_args_list
-        tools_called = [c.args[0] for c in calls]
-        assert "set_avatar" in tools_called
+            handler = get_handler("thinking_start")
+            assert handler is not None
+            await handler({})
 
-        # Find the set_avatar call
-        avatar_call = next(c for c in calls if c.args[0] == "set_avatar")
-        assert avatar_call.kwargs == {"face": "thinking"}
+            # Should call set_avatar(face="thinking") at minimum
+            calls = mock_call.call_args_list
+            tools_called = [c.args[0] for c in calls]
+            assert "set_avatar" in tools_called
 
-        # Should set RED LEDs at start
-        led_call = next((c for c in calls if c.args[0] == "set_all_leds"), None)
-        assert led_call is not None
-        assert led_call.kwargs == {"r": 255, "g": 0, "b": 0}
+            # Find the set_avatar call
+            avatar_call = next(c for c in calls if c.args[0] == "set_avatar")
+            assert avatar_call.kwargs == {"face": "thinking"}
+
+            # Should set LED pattern to "rainbow" via LED Stream Server
+            mock_client.set_pattern.assert_called_once_with("rainbow")
+            mock_client.set_fps.assert_called_once_with(20)
+            mock_client.set_brightness.assert_called_once_with(1.0)
 
 
 @pytest.mark.asyncio

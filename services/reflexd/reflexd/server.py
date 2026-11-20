@@ -23,6 +23,34 @@ logger = logging.getLogger(__name__)
 
 from typing import TypedDict
 
+import uuid
+
+
+# Session management
+_sessions: dict[str, dict] = {}
+_session_lock = asyncio.Lock()
+
+
+def _new_session_id() -> str:
+    return uuid.uuid4().hex
+
+
+async def _get_session(session_id: str) -> dict | None:
+    async with _session_lock:
+        return _sessions.get(session_id)
+
+
+async def _create_session() -> str:
+    session_id = _new_session_id()
+    async with _session_lock:
+        _sessions[session_id] = {"created": time.time(), "data": {}}
+    return session_id
+
+
+async def _delete_session(session_id: str) -> None:
+    async with _session_lock:
+        _sessions.pop(session_id, None)
+
 
 class RunningEntry(TypedDict):
     task: asyncio.Task
@@ -244,7 +272,44 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
     req_id = body.get("id")
 
     try:
-        if method == "tools/call":
+        if method == "initialize":
+            session_id = await _create_session()
+            result = {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "eidos-reflexd",
+                    "version": "0.1.0"
+                }
+            }
+            response = web.json_response({"jsonrpc": "2.0", "id": req_id, "result": result})
+            response.headers["Mcp-Session-Id"] = session_id
+            return response
+        elif method == "tools/call":
+            # Validate session
+            session_id = request.headers.get("Mcp-Session-Id")
+            if not session_id:
+                return web.json_response(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32600, "message": "Missing Mcp-Session-Id header"},
+                    },
+                    status=400,
+                )
+            session = await _get_session(session_id)
+            if not session:
+                return web.json_response(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32600, "message": "Invalid or expired session"},
+                    },
+                    status=400,
+                )
+
             tool_name = params.get("name")
             arguments = params.get("arguments", {})
 
