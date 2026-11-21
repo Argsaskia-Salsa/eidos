@@ -58,7 +58,9 @@ _rate_limiter = RateLimiter(_get_rate_limit_config()[0])
 
 
 class GatewayClient:
-    def __init__(self, url: str, token: str, timeout: aiohttp.ClientTimeout | None = None):
+    def __init__(
+        self, url: str, token: str, timeout: aiohttp.ClientTimeout | None = None
+    ):
         self.url = url
         self.token = token
         self.timeout = timeout or _get_timeout()
@@ -80,12 +82,17 @@ class GatewayClient:
         for attempt in range(1, max_attempts + 1):
             try:
                 await self.connect()
-                logger.info("Connected to gateway at %s (attempt %d)", self.url, attempt)
+                logger.info(
+                    "Connected to gateway at %s (attempt %d)", self.url, attempt
+                )
                 return
             except (aiohttp.ClientError, OSError, TimeoutError) as e:
                 last_error = e
                 if attempt < max_attempts:
-                    delay = min(base_delay * (2 ** (attempt - 1)) + random.uniform(0, 1), max_delay)
+                    delay = min(
+                        base_delay * (2 ** (attempt - 1)) + random.uniform(0, 1),
+                        max_delay,
+                    )
                     logger.warning(
                         "Gateway connection failed (attempt %d/%d): %s. Retrying in %.2fs...",
                         attempt,
@@ -95,8 +102,14 @@ class GatewayClient:
                     )
                     await asyncio.sleep(delay)
                 else:
-                    logger.error("Gateway connection failed after %d attempts: %s", max_attempts, e)
-        raise RuntimeError(f"Failed to connect to gateway after {max_attempts} attempts") from last_error
+                    logger.error(
+                        "Gateway connection failed after %d attempts: %s",
+                        max_attempts,
+                        e,
+                    )
+        raise RuntimeError(
+            f"Failed to connect to gateway after {max_attempts} attempts"
+        ) from last_error
 
     async def _initialize(self) -> None:
         if not self.session:

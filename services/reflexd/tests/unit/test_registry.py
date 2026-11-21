@@ -27,6 +27,7 @@ def test_on_event_overwrite_warns(caplog):
         return data
 
     with caplog.at_level(logging.WARNING):
+
         @on_event("test_event")
         async def handler2(data):
             return data

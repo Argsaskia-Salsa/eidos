@@ -8,6 +8,7 @@ from pathlib import Path
 # Load .env file if exists
 try:
     from dotenv import load_dotenv
+
     env_path = Path(__file__).parent.parent.parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path)
@@ -17,6 +18,7 @@ except ImportError:
 
 class LEDConfig:
     """LED Stream configuration from environment variables."""
+
     # Network
     WS_HOST: str = os.getenv("WS_HOST", "0.0.0.0")
     WS_PORT: int = int(os.getenv("WS_PORT", "8772"))

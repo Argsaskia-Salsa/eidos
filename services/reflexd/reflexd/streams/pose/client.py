@@ -34,14 +34,14 @@ class PoseStreamClient:
         ws_url: str | None = None,
         target: str | None = None,
         max_fps: float | None = None,
-        timeout: aiohttp.ClientTimeout | None = None
+        timeout: aiohttp.ClientTimeout | None = None,
     ):
         # HTTP control client (composed)
         self.http_client = StreamClient(
             http_url or CONFIG.HTTP_SERVER_URL,
             element_name="pose",
             intensity_name="smoothing",
-            timeout=timeout
+            timeout=timeout,
         )
 
         # MCP configuration
@@ -53,7 +53,9 @@ class PoseStreamClient:
 
         self._session: aiohttp.ClientSession | None = None
         self._session_id: str | None = None
-        self._timeout = timeout or aiohttp.ClientTimeout(total=10.0, connect=5.0, sock_read=5.0)
+        self._timeout = timeout or aiohttp.ClientTimeout(
+            total=10.0, connect=5.0, sock_read=5.0
+        )
 
     async def __aenter__(self):
         self._session = aiohttp.ClientSession(timeout=self._timeout)
@@ -90,15 +92,15 @@ class PoseStreamClient:
                 "params": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
-                    "clientInfo": {"name": "pose_stream_client", "version": "1.0"}
+                    "clientInfo": {"name": "pose_stream_client", "version": "1.0"},
                 },
-                "id": str(uuid.uuid4())
+                "id": str(uuid.uuid4()),
             },
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
-                "Authorization": f"Bearer {self.token}"
-            }
+                "Authorization": f"Bearer {self.token}",
+            },
         ) as resp:
             session_id = resp.headers.get("Mcp-Session-Id")
             if not session_id:
@@ -120,15 +122,15 @@ class PoseStreamClient:
                 "jsonrpc": "2.0",
                 "method": "tools/call",
                 "params": {"name": tool, "arguments": args},
-                "id": str(uuid.uuid4())
+                "id": str(uuid.uuid4()),
             },
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
                 "Authorization": f"Bearer {self.token}",
-                "Mcp-Session-Id": self._session_id
+                "Mcp-Session-Id": self._session_id,
             },
-            timeout=self._timeout
+            timeout=self._timeout,
         ) as resp:
             data = await resp.json()
             if "error" in data:
@@ -137,24 +139,23 @@ class PoseStreamClient:
 
     async def stream_start(self) -> dict:
         """Start pose stream via gateway MCP."""
-        return await self.mcp_call("stackchan_follow_pose_stream", {
-            "action": "start",
-            "url": self.ws_url,
-            "target": self.target,
-            "max_fps": self.max_fps
-        })
+        return await self.mcp_call(
+            "stackchan_follow_pose_stream",
+            {
+                "action": "start",
+                "url": self.ws_url,
+                "target": self.target,
+                "max_fps": self.max_fps,
+            },
+        )
 
     async def stream_stop(self) -> dict:
         """Stop pose stream via gateway MCP."""
-        return await self.mcp_call("stackchan_follow_pose_stream", {
-            "action": "stop"
-        })
+        return await self.mcp_call("stackchan_follow_pose_stream", {"action": "stop"})
 
     async def stream_status(self) -> dict:
         """Get pose stream status via gateway MCP."""
-        return await self.mcp_call("stackchan_follow_pose_stream", {
-            "action": "status"
-        })
+        return await self.mcp_call("stackchan_follow_pose_stream", {"action": "status"})
 
     # ===== HTTP CONTROL (delegated to composed client) =====
 

@@ -13,14 +13,14 @@
 | **GatewayClient** | `reflexd/gateway_client.py` | MCP JSON-RPC client (aiohttp). `connect()`, `call(tool, args)`, `close()`. Applies safety clamps & rate limits for `move_head`. Circuit breaker + retry logic. |
 | **Safety** | `reflexd/safety.py` | `clamp_move_head(yaw, pitch, speed)` → clamped tuple. |
 | **Server Handlers** | `reflexd/server.py` | MCP server endpoints: `handle_inject_event`, `handle_call`, `handle_list_reflexes`, `handle_list_gateway_tools`, `handle_reload_reflexes`, `handle_jsonrpc`, `health_check`, `cancel_reflex`, `list_running_reflexes`. Uses `Registry` + `GatewayClient`. Preemption by priority/conflict_group. |
-| **Reflexes** | `reflexd/reflexes/` | Event implementations: `thinking.py`, `idle.py`, `greeting.py`. Decorated with `@on_event`. |
+| **Reflexes** | `reflexes/` | Event implementations: `thinking.py`, `idle.py`, `greeting.py`. Decorated with `@on_event`. Located at project root (`services/reflexd/reflexes/`), not inside `reflexd/` package. |
 | **Entrypoint** | `reflexd/main.py` | CLI, config, `REFLEXES_DIR`, `run_server()`. Signal handling, graceful shutdown. |
 | **Tools** | `reflexd/gateway_tools.py` | MCP tool definitions (`GATEWAY_TOOLS`). |
 | **Circuit Breaker** | `reflexd/circuit_breaker.py` | Failure threshold, recovery timeout, half-open state. Protects gateway calls. |
 | **Event Bus** | `reflexd/event_bus.py` | Pub/sub for internal events (`publish`, `subscribe`, `unsubscribe`). |
 | **Interruption** | `reflexd/interruption.py` | Reflex cancellation, preemption, same-name replacement logic. |
 | **MCP Tools** | `reflexd/mcp_tools.py` | Tool implementations: `cancel_reflex`, `list_running_reflexes`. |
-| **Unit Tests** | `tests/unit/` | 14 files, 122 tests. One per module + reflexes + new modules. |
+| **Unit Tests** | `tests/unit/` | 14 files, 125 tests. One per module + reflexes + new modules. |
 | **Integration Tests** | `tests/integration/test_mcp_endpoints.py` | 15 tests against real aiohttp server. |
 
 ---
@@ -145,7 +145,7 @@ pytest tests/ -v && ruff check . && mypy reflexd && pytest --cov=reflexd --cov-r
 ```
 services/reflexd/
 ├── pyproject.toml          # pytest, ruff, mypy config
-├── reflexd/
+├── reflexd/                # Main package
 │   ├── __init__.py         # on_event, call, trigger_event, subscribe, unsubscribe
 │   ├── registry.py         # handler registry + metadata (priority, cleanup, conflict_group)
 │   ├── safety.py           # clamp_move_head
@@ -157,25 +157,30 @@ services/reflexd/
 │   ├── event_bus.py        # internal pub/sub
 │   ├── interruption.py     # cancellation, preemption, same-name replacement
 │   ├── mcp_tools.py        # cancel_reflex, list_running_reflexes implementations
-│   └── reflexes/           # thinking, idle, greeting
-└── tests/
-    ├── conftest.py         # fixtures
-    ├── fixtures/           # sample reflexes for integration tests
-    ├── unit/               # 122 unit tests
-    │   ├── test_registry.py
-    │   ├── test_registry_metadata.py
-    │   ├── test_safety.py
-    │   ├── test_gateway_client.py
-    │   ├── test_server_handlers.py
-    │   ├── test_reflex_thinking.py
-    │   ├── test_reflex_idle.py
-    │   ├── test_reflex_greeting.py
-    │   ├── test_circuit_breaker.py
-    │   ├── test_event_bus.py
-    │   ├── test_interruption.py
-    │   ├── test_main.py
-    │   ├── test_mcp_tools.py
-    │   └── test_init.py
-    └── integration/        # 15 integration tests
-        └── test_mcp_endpoints.py
+│   └── streams/            # LED/Pose stream servers & clients
+├── reflexes/               # Event implementations (sibling to reflexd/, not inside)
+│   ├── thinking.py         # thinking_start/end, user_message/response
+│   ├── idle.py             # idle_tick with micro-movements
+│   └── greeting.py         # user_message/response fallback
+├── tests/
+│   ├── conftest.py         # fixtures
+│   ├── fixtures/           # sample reflexes for integration tests
+│   ├── unit/               # 125 unit tests
+│   │   ├── test_registry.py
+│   │   ├── test_registry_metadata.py
+│   │   ├── test_safety.py
+│   │   ├── test_gateway_client.py
+│   │   ├── test_server_handlers.py
+│   │   ├── test_reflex_thinking.py
+│   │   ├── test_reflex_idle.py
+│   │   ├── test_reflex_greeting.py
+│   │   ├── test_circuit_breaker.py
+│   │   ├── test_event_bus.py
+│   │   ├── test_interruption.py
+│   │   ├── test_main.py
+│   │   ├── test_mcp_tools.py
+│   │   └── test_init.py
+│   └── integration/        # 15 integration tests
+│       └── test_mcp_endpoints.py
+└── *.py                    # Development scripts (led_cycle, led_ws_server, etc.)
 ```

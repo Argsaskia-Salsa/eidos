@@ -21,10 +21,8 @@ from .registry import (
 
 logger = logging.getLogger(__name__)
 
-from typing import TypedDict
-
 import uuid
-
+from typing import TypedDict
 
 # Session management
 _sessions: dict[str, dict] = {}
@@ -87,6 +85,7 @@ class EventCancelledError(InjectEventError):
 
 def _get_reflexes_dir() -> str:
     from .main import REFLEXES_DIR
+
     return REFLEXES_DIR
 
 
@@ -96,7 +95,9 @@ def _validate_tool_arguments(tool_name: str, arguments: dict) -> None:
         try:
             validate(instance=arguments, schema=tool_schema)
         except ValidationError as e:
-            raise InjectEventError(-32602, f"Invalid arguments for tool '{tool_name}': {e.message}")
+            raise InjectEventError(
+                -32602, f"Invalid arguments for tool '{tool_name}': {e.message}"
+            )
 
 
 _running_locks: dict[int, asyncio.Lock] = {}
@@ -153,7 +154,11 @@ async def handle_inject_event(name: str, data: dict) -> dict:
             entry_priority = entry["priority"]
             entry_group = entry["conflict_group"]
             should_cancel = False
-            if new_conflict_group and entry_group == new_conflict_group or new_priority > entry_priority:
+            if (
+                new_conflict_group
+                and entry_group == new_conflict_group
+                or new_priority > entry_priority
+            ):
                 should_cancel = True
             if should_cancel:
                 to_cancel.append(running_name)
@@ -276,15 +281,12 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
             session_id = await _create_session()
             result = {
                 "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {}
-                },
-                "serverInfo": {
-                    "name": "eidos-reflexd",
-                    "version": "0.1.0"
-                }
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "eidos-reflexd", "version": "0.1.0"},
             }
-            response = web.json_response({"jsonrpc": "2.0", "id": req_id, "result": result})
+            response = web.json_response(
+                {"jsonrpc": "2.0", "id": req_id, "result": result}
+            )
             response.headers["Mcp-Session-Id"] = session_id
             return response
         elif method == "tools/call":
@@ -295,7 +297,10 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
                     {
                         "jsonrpc": "2.0",
                         "id": req_id,
-                        "error": {"code": -32600, "message": "Missing Mcp-Session-Id header"},
+                        "error": {
+                            "code": -32600,
+                            "message": "Missing Mcp-Session-Id header",
+                        },
                     },
                     status=400,
                 )
@@ -305,7 +310,10 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
                     {
                         "jsonrpc": "2.0",
                         "id": req_id,
-                        "error": {"code": -32600, "message": "Invalid or expired session"},
+                        "error": {
+                            "code": -32600,
+                            "message": "Invalid or expired session",
+                        },
                     },
                     status=400,
                 )
@@ -384,7 +392,10 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
                     {
                         "jsonrpc": "2.0",
                         "id": req_id,
-                        "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
+                        "error": {
+                            "code": -32601,
+                            "message": f"Unknown tool: {tool_name}",
+                        },
                     },
                     status=404,
                 )

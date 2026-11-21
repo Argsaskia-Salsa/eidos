@@ -34,7 +34,7 @@ class PoseStreamServer(StreamServer):
         return {
             "ts": time.time(),
             "kind": "continuous",
-            "angles": [frame_angles]  # Single frame: [yaw, pitch, roll]
+            "angles": [frame_angles],  # Single frame: [yaw, pitch, roll]
         }
 
     def generate_frames(self, pose_func: callable, **args: Any) -> list:  # type: ignore[valid-type,override]
@@ -50,13 +50,13 @@ class PoseState(StreamServer.StreamState):
 
     def apply_intensity(self, frames: list) -> list:
         """Apply smoothing to frames.
-        
+
         Smoothing interpolates between current and target angles.
         1.0 = no smoothing (direct), 0.0 = fully smoothed (stay at current).
         """
         if self.intensity >= 1.0:
             return frames
-        
+
         # For poses, smoothing works differently than LED brightness
         # We apply smoothing as a factor to the angle values
         # This is a simple implementation - real smoothing would interpolate between frames

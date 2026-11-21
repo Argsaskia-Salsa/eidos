@@ -4,21 +4,21 @@ Base classes and stream implementations.
 """
 
 from .base import (
-    StreamRegistry,
-    SpecProtocol,
-    StreamServer,
     ServerConfig,
-    StreamClient,
+    SpecProtocol,
     StreamCLI,
+    StreamClient,
+    StreamRegistry,
+    StreamServer,
     run_cli,
 )
 
 __all__ = [
-    "StreamRegistry",
-    "SpecProtocol",
-    "StreamServer",
     "ServerConfig",
-    "StreamClient",
+    "SpecProtocol",
     "StreamCLI",
+    "StreamClient",
+    "StreamRegistry",
+    "StreamServer",
     "run_cli",
 ]

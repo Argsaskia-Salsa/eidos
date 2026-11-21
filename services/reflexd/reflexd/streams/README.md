@@ -49,10 +49,11 @@ class MyRegistry(StreamRegistry):
     custom_dir = Path(__file__).parent / "patterns" / "custom"
     module_prefix = "my_stream.patterns.custom"
     spec_attr = "PATTERN"  # attribute to look for in custom modules
-    
+
     _BUILTIN_SPECS = {
         "element_name": SpecProtocol(...),
     }
+
 
 MyRegistry.reload_all()  # Load builtins + custom
 ```
@@ -64,10 +65,10 @@ Base class contains full algorithm. Subclass implements 6 hooks:
 
 ```python
 class MyStreamServer(StreamServer):
-    element_name = "pattern"      # "pattern" | "pose" | "mode"
-    intensity_name = "brightness" # "brightness" | "smoothing" | "sensitivity"
+    element_name = "pattern"  # "pattern" | "pose" | "mode"
+    intensity_name = "brightness"  # "brightness" | "smoothing" | "sensitivity"
     registry = MyRegistry
-    
+
     def get_config(self) -> ServerConfig: ...
     def make_frame(self, element_data, intensity) -> dict: ...
     def generate_frames(self, element_func, **args) -> list: ...
@@ -96,9 +97,12 @@ class MyStreamCLI(StreamCLI):
     intensity_name = "brightness"
     registry = MyRegistry
     http_url = "http://localhost:8773"
-    
-    def create_stream_client(self): return MyStreamClient()
-    def add_element_args(self, parser): parser.add_argument("--color", ...)
+
+    def create_stream_client(self):
+        return MyStreamClient()
+
+    def add_element_args(self, parser):
+        parser.add_argument("--color", ...)
 ```
 
 ## Testing

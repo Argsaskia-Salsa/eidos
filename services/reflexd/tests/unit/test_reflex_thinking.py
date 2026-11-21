@@ -18,6 +18,7 @@ def reset_registry():
 
 class MockLEDClient:
     """Mock LEDStreamClient with proper async context manager."""
+
     def __init__(self):
         self.set_pattern = AsyncMock()
         self.set_fps = AsyncMock()
@@ -25,16 +26,17 @@ class MockLEDClient:
         self.reload_patterns = AsyncMock()
         self.status = AsyncMock()
         self.list_patterns = AsyncMock()
-    
+
     async def __aenter__(self):
         return self
-    
+
     async def __aexit__(self, *args):
         pass
 
 
 class MockPoseClient:
     """Mock PoseStreamClient with proper async context manager."""
+
     def __init__(self, fail_on=None):
         self.set_pose = AsyncMock()
         self.set_smoothing = AsyncMock()
@@ -46,17 +48,19 @@ class MockPoseClient:
         self.stream_stop = AsyncMock()
         self.stream_status = AsyncMock()
         self._fail_on = fail_on or set()
-    
+
     async def __aenter__(self):
         return self
-    
+
     async def __aexit__(self, *args):
         pass
-    
+
     def __getattr__(self, name):
         if name in self._fail_on:
+
             async def failing_method(*args, **kwargs):
                 raise PoseStreamError(f"Connection refused: {name}")
+
             return failing_method
         return super().__getattr__(name)
 
@@ -176,9 +180,10 @@ async def test_idle_sets_neutral_pose_and_clears_leds():
             # First trigger thinking_start to set state to THINKING
             start_handler = get_handler("thinking_start")
             await start_handler({})
-            
+
             # Call cleanup for thinking_start (simulates event cleanup - goes to idle)
             from reflexes.thinking import _thinking_reflex
+
             await _thinking_reflex.cleanup_thinking()
 
             # Should call clear_leds and set_avatar(face="neutral") via call()
@@ -188,7 +193,9 @@ async def test_idle_sets_neutral_pose_and_clears_leds():
             assert "set_avatar" in tools_called
 
             # Should call set_pose("off") via PoseStreamClient (from _enter_idle via cleanup)
-            off_calls = [c for c in mock_pose.set_pose.call_args_list if c.args[0] == "off"]
+            off_calls = [
+                c for c in mock_pose.set_pose.call_args_list if c.args[0] == "off"
+            ]
             assert len(off_calls) >= 1
 
 
@@ -198,8 +205,10 @@ async def test_pose_stream_fallback_to_direct_call():
     mock_call = AsyncMock()
     # Make PoseStreamClient fail on set_pose by replacing the mock
     mock_pose = MockPoseClient()
+
     async def failing_set_pose(*args, **kwargs):
         raise PoseStreamError("Connection refused")
+
     mock_pose.set_pose = failing_set_pose
 
     with patch("reflexd.call", mock_call):
@@ -250,10 +259,15 @@ async def test_thinking_idle_pose_called_during_micro_movements():
 
             # Give time for micro_movements_loop to run
             import asyncio
+
             await asyncio.sleep(0.01)
 
             # Should call set_pose("thinking_idle") once with correct params
-            thinking_idle_calls = [c for c in mock_pose.set_pose.call_args_list if c.args[0] == "thinking_idle"]
+            thinking_idle_calls = [
+                c
+                for c in mock_pose.set_pose.call_args_list
+                if c.args[0] == "thinking_idle"
+            ]
             assert len(thinking_idle_calls) == 1
             pose_call = thinking_idle_calls[0]
             assert pose_call.kwargs["base_yaw"] == 30.0

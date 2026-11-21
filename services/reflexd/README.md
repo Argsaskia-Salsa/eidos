@@ -335,20 +335,22 @@ Create `*.py` in `services/reflexd/reflexd/streams/led/patterns/custom/`:
 ```python
 from reflexd.streams.led.registry import LEDPatternSpec
 
-def my_pattern(num_leds=12, color=[255,0,0], **kwargs):
+
+def my_pattern(num_leds=12, color=[255, 0, 0], **kwargs):
     # Return list[Frame] where Frame = list[list[int]] (LED x RGB)
     frames = []
     for i in range(num_leds):
-        colors = [[0,0,0] for _ in range(num_leds)]
+        colors = [[0, 0, 0] for _ in range(num_leds)]
         colors[i] = color
         frames.append(colors)
     return frames
 
+
 PATTERN = LEDPatternSpec(
     name="my_pattern",
     func=my_pattern,
-    args={"color": [255,0,0]},
-    description="My custom pattern"
+    args={"color": [255, 0, 0]},
+    description="My custom pattern",
 )
 ```
 
@@ -393,8 +395,8 @@ python -m reflexd.streams.led reload
 
 ```python
 async with LEDStreamClient() as client:
-    await client.stream_start()   # Start WS stream via gateway
-    await client.stream_stop()    # Stop stream
+    await client.stream_start()  # Start WS stream via gateway
+    await client.stream_stop()  # Stop stream
     status = await client.stream_status()
 ```
 
@@ -476,14 +478,17 @@ from reflexd import on_event, call
 import asyncio
 import random
 
+
 @on_event("user_message")
 async def on_user_message(event):
     await call("set_avatar", face="happy")
     await call("move_head", yaw=10, pitch=60)
 
+
 @on_event("thinking_start")
 async def on_thinking_start(event):
     await call("set_avatar", face="thinking")
+
 
 # Long-running reflex: runs until cancelled by next event of same type
 @on_event("idle_tick")

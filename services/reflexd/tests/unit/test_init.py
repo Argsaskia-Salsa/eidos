@@ -9,8 +9,9 @@ from reflexd.gateway_client import GatewayClient
 class TestInitCall:
     @pytest.mark.asyncio
     async def test_call_raises_when_no_gateway_client(self):
-        with patch("reflexd.get_gateway_client", return_value=None), pytest.raises(
-            RuntimeError, match="Gateway client not connected"
+        with (
+            patch("reflexd.get_gateway_client", return_value=None),
+            pytest.raises(RuntimeError, match="Gateway client not connected"),
         ):
             await call("set_avatar", {"face": "happy"})
 

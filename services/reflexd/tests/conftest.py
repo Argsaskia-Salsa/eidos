@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -8,6 +9,28 @@ from aiohttp.test_utils import TestClient, TestServer
 from reflexd.gateway_client import GatewayClient
 from reflexd.registry import clear
 from reflexd.server import _running, create_app
+
+# Add reflexes directory (services/reflexd/reflexes) to Python path
+REFLEXES_ROOT = Path(__file__).parent.parent / "reflexes"
+sys.path.insert(0, str(REFLEXES_ROOT.parent))
+
+
+@pytest.fixture(autouse=True)
+def clear_reflexes_modules():
+    """Clear reflexes modules from sys.modules to ensure test isolation."""
+    # Clear before test
+    for mod_name in list(sys.modules.keys()):
+        if mod_name.startswith("reflexes."):
+            del sys.modules[mod_name]
+    if "reflexes" in sys.modules:
+        del sys.modules["reflexes"]
+    yield
+    # Clear after test
+    for mod_name in list(sys.modules.keys()):
+        if mod_name.startswith("reflexes."):
+            del sys.modules[mod_name]
+    if "reflexes" in sys.modules:
+        del sys.modules["reflexes"]
 
 
 @pytest.fixture

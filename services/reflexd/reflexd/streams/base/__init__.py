@@ -2,17 +2,17 @@
 Base classes for stream implementations.
 """
 
-from .registry import StreamRegistry, SpecProtocol
-from .server import StreamServer, ServerConfig
-from .client import StreamClient
 from .cli import StreamCLI, run_cli
+from .client import StreamClient
+from .registry import SpecProtocol, StreamRegistry
+from .server import ServerConfig, StreamServer
 
 __all__ = [
-    "StreamRegistry",
-    "SpecProtocol",
-    "StreamServer",
     "ServerConfig",
-    "StreamClient",
+    "SpecProtocol",
     "StreamCLI",
+    "StreamClient",
+    "StreamRegistry",
+    "StreamServer",
     "run_cli",
 ]

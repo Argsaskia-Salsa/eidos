@@ -6,9 +6,12 @@ All LEDs pulse together at a configurable frequency.
 from reflexd.streams.led.registry import LEDPatternSpec
 
 
-def pulse(num_leds: int = 12, color: list[int] = [255, 100, 0], freq: float = 1.0) -> list[list[list[int]]]:
+def pulse(
+    num_leds: int = 12, color: list[int] = [255, 100, 0], freq: float = 1.0
+) -> list[list[list[int]]]:
     """Pulsing effect - all LEDs fade in and out together."""
     import math
+
     patterns = []
     frames = int(60 / freq)  # frames per cycle
     for frame in range(frames):
@@ -26,5 +29,5 @@ PATTERN = LEDPatternSpec(
     name="pulse",
     func=pulse,
     args={"color": [255, 100, 0], "freq": 1.0},
-    description="All LEDs pulse in/out at configurable frequency"
+    description="All LEDs pulse in/out at configurable frequency",
 )

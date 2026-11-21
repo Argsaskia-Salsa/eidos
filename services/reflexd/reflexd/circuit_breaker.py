@@ -36,7 +36,10 @@ class CircuitBreaker:
     async def call(self, func, *args, **kwargs):
         async with self._lock:
             if self._state == CircuitState.OPEN:
-                if self._last_failure_time and time.time() - self._last_failure_time >= self.recovery_timeout:
+                if (
+                    self._last_failure_time
+                    and time.time() - self._last_failure_time >= self.recovery_timeout
+                ):
                     logger.info("Circuit breaker transitioning to HALF_OPEN")
                     self._state = CircuitState.HALF_OPEN
                     self._half_open_calls = 0
@@ -73,10 +76,15 @@ class CircuitBreaker:
             self._last_failure_time = time.time()
 
             if self._state == CircuitState.HALF_OPEN:
-                logger.warning("Circuit breaker transitioning to OPEN after HALF_OPEN failure")
+                logger.warning(
+                    "Circuit breaker transitioning to OPEN after HALF_OPEN failure"
+                )
                 self._state = CircuitState.OPEN
                 self._half_open_calls = 0
-            elif self._state == CircuitState.CLOSED and self._failure_count >= self.failure_threshold:
+            elif (
+                self._state == CircuitState.CLOSED
+                and self._failure_count >= self.failure_threshold
+            ):
                 logger.warning(
                     "Circuit breaker transitioning to OPEN after %d failures",
                     self._failure_count,

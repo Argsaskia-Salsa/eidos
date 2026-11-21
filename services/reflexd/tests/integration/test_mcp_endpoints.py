@@ -39,6 +39,29 @@ async def client(app):
         yield client
 
 
+@pytest.fixture
+async def initialized_client(client):
+    """Initialize an MCP session and return the client with session ID header set."""
+    # Call initialize to create a session
+    resp = await client.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "method": "initialize",
+            "params": {},
+            "id": 1,
+        },
+    )
+    assert resp.status == 200
+    data = await resp.json()
+    assert "result" in data
+    session_id = resp.headers.get("Mcp-Session-Id")
+    assert session_id is not None
+    # Set the session header on the client for subsequent requests
+    client.session_id = session_id
+    return client
+
+
 class TestHealthEndpoint:
     @pytest.mark.asyncio
     async def test_health_endpoint(self, client):
@@ -86,14 +109,16 @@ class TestJSONRPCErrors:
 
 class TestToolsCall:
     @pytest.mark.asyncio
-    async def test_tools_call_inject_event(self, client, mock_gateway_client):
+    async def test_tools_call_inject_event(
+        self, initialized_client, mock_gateway_client
+    ):
         from reflexd.registry import on_event
 
         @on_event("test_event")
         async def handler(data):
             return {"handled": True}
 
-        resp = await client.post(
+        resp = await initialized_client.post(
             "/mcp",
             json={
                 "jsonrpc": "2.0",
@@ -104,6 +129,7 @@ class TestToolsCall:
                 },
                 "id": 1,
             },
+            headers={"Mcp-Session-Id": initialized_client.session_id},
         )
         assert resp.status == 200
         data = await resp.json()
@@ -111,7 +137,9 @@ class TestToolsCall:
         assert data["result"]["event"] == "test_event"
 
     @pytest.mark.asyncio
-    async def test_tools_call_inject_event_cancel(self, client, mock_gateway_client):
+    async def test_tools_call_inject_event_cancel(
+        self, initialized_client, mock_gateway_client
+    ):
         from reflexd.registry import on_event
 
         cancel_event = asyncio.Event()
@@ -122,7 +150,7 @@ class TestToolsCall:
             await asyncio.sleep(10)
 
         asyncio.create_task(
-            client.post(
+            initialized_client.post(
                 "/mcp",
                 json={
                     "jsonrpc": "2.0",
@@ -133,13 +161,14 @@ class TestToolsCall:
                     },
                     "id": 1,
                 },
+                headers={"Mcp-Session-Id": initialized_client.session_id},
             )
         )
 
         await asyncio.wait_for(cancel_event.wait(), timeout=1.0)
         await asyncio.sleep(0.05)
 
-        resp2 = await client.post(
+        resp2 = await initialized_client.post(
             "/mcp",
             json={
                 "jsonrpc": "2.0",
@@ -150,6 +179,7 @@ class TestToolsCall:
                 },
                 "id": 2,
             },
+            headers={"Mcp-Session-Id": initialized_client.session_id},
         )
 
         data2 = await resp2.json()
@@ -158,10 +188,10 @@ class TestToolsCall:
         await asyncio.sleep(0.05)
 
     @pytest.mark.asyncio
-    async def test_tools_call_call(self, client, mock_gateway_client):
+    async def test_tools_call_call(self, initialized_client, mock_gateway_client):
         mock_gateway_client.call.return_value = {"position": {"yaw": 10, "pitch": 60}}
 
-        resp = await client.post(
+        resp = await initialized_client.post(
             "/mcp",
             json={
                 "jsonrpc": "2.0",
@@ -175,6 +205,7 @@ class TestToolsCall:
                 },
                 "id": 1,
             },
+            headers={"Mcp-Session-Id": initialized_client.session_id},
         )
         assert resp.status == 200
         data = await resp.json()
@@ -184,7 +215,9 @@ class TestToolsCall:
         )
 
     @pytest.mark.asyncio
-    async def test_tools_call_list_reflexes(self, client, mock_gateway_client):
+    async def test_tools_call_list_reflexes(
+        self, initialized_client, mock_gateway_client
+    ):
         from reflexd.registry import on_event
 
         @on_event("reflex1")
@@ -195,7 +228,7 @@ class TestToolsCall:
         async def h2(data):
             pass
 
-        resp = await client.post(
+        resp = await initialized_client.post(
             "/mcp",
             json={
                 "jsonrpc": "2.0",
@@ -203,16 +236,19 @@ class TestToolsCall:
                 "params": {"name": "list_reflexes", "arguments": {}},
                 "id": 1,
             },
+            headers={"Mcp-Session-Id": initialized_client.session_id},
         )
         assert resp.status == 200
         data = await resp.json()
         assert set(data["result"]["reflexes"]) == {"reflex1", "reflex2"}
 
     @pytest.mark.asyncio
-    async def test_tools_call_list_gateway_tools(self, client, mock_gateway_client):
+    async def test_tools_call_list_gateway_tools(
+        self, initialized_client, mock_gateway_client
+    ):
         from reflexd.gateway_tools import GATEWAY_TOOLS
 
-        resp = await client.post(
+        resp = await initialized_client.post(
             "/mcp",
             json={
                 "jsonrpc": "2.0",
@@ -220,6 +256,7 @@ class TestToolsCall:
                 "params": {"name": "list_gateway_tools", "arguments": {}},
                 "id": 1,
             },
+            headers={"Mcp-Session-Id": initialized_client.session_id},
         )
         assert resp.status == 200
         data = await resp.json()
@@ -227,7 +264,7 @@ class TestToolsCall:
 
     @pytest.mark.asyncio
     async def test_tools_call_reload_reflexes(
-        self, client, mock_gateway_client, tmp_path
+        self, initialized_client, mock_gateway_client, tmp_path
     ):
         reflexes_dir = tmp_path / "reflexes"
         reflexes_dir.mkdir()
@@ -237,7 +274,7 @@ class TestToolsCall:
 
         sys.path.insert(0, str(reflexes_dir.parent))
         with patch("reflexd.main.REFLEXES_DIR", str(reflexes_dir)):
-            resp = await client.post(
+            resp = await initialized_client.post(
                 "/mcp",
                 json={
                     "jsonrpc": "2.0",
@@ -245,6 +282,7 @@ class TestToolsCall:
                     "params": {"name": "reload_reflexes", "arguments": {}},
                     "id": 1,
                 },
+                headers={"Mcp-Session-Id": initialized_client.session_id},
             )
         assert resp.status == 200
         data = await resp.json()
@@ -252,14 +290,16 @@ class TestToolsCall:
         assert "test_reflex" in data["result"]["loaded"]
 
     @pytest.mark.asyncio
-    async def test_tools_call_user_message(self, client, mock_gateway_client):
+    async def test_tools_call_user_message(
+        self, initialized_client, mock_gateway_client
+    ):
         from reflexd.registry import on_event
 
         @on_event("user_message")
         async def handler(data):
             return {"handled": True}
 
-        resp = await client.post(
+        resp = await initialized_client.post(
             "/mcp",
             json={
                 "jsonrpc": "2.0",
@@ -270,20 +310,23 @@ class TestToolsCall:
                 },
                 "id": 1,
             },
+            headers={"Mcp-Session-Id": initialized_client.session_id},
         )
         assert resp.status == 200
         data = await resp.json()
         assert data["result"]["status"] == "ok"
 
     @pytest.mark.asyncio
-    async def test_tools_call_thinking_start(self, client, mock_gateway_client):
+    async def test_tools_call_thinking_start(
+        self, initialized_client, mock_gateway_client
+    ):
         from reflexd.registry import on_event
 
         @on_event("thinking_start")
         async def handler(data):
             return {"handled": True}
 
-        resp = await client.post(
+        resp = await initialized_client.post(
             "/mcp",
             json={
                 "jsonrpc": "2.0",
@@ -291,14 +334,17 @@ class TestToolsCall:
                 "params": {"name": "thinking_start", "arguments": {}},
                 "id": 1,
             },
+            headers={"Mcp-Session-Id": initialized_client.session_id},
         )
         assert resp.status == 200
         data = await resp.json()
         assert data["result"]["status"] == "ok"
 
     @pytest.mark.asyncio
-    async def test_tools_call_unknown_tool(self, client, mock_gateway_client):
-        resp = await client.post(
+    async def test_tools_call_unknown_tool(
+        self, initialized_client, mock_gateway_client
+    ):
+        resp = await initialized_client.post(
             "/mcp",
             json={
                 "jsonrpc": "2.0",
@@ -306,6 +352,7 @@ class TestToolsCall:
                 "params": {"name": "unknown_tool", "arguments": {}},
                 "id": 1,
             },
+            headers={"Mcp-Session-Id": initialized_client.session_id},
         )
         assert resp.status == 404
         data = await resp.json()
@@ -314,7 +361,9 @@ class TestToolsCall:
         assert "Unknown tool" in data["error"]["message"]
 
     @pytest.mark.asyncio
-    async def test_concurrent_inject_events(self, client, mock_gateway_client):
+    async def test_concurrent_inject_events(
+        self, initialized_client, mock_gateway_client
+    ):
         from reflexd.registry import on_event
 
         results = []
@@ -325,7 +374,7 @@ class TestToolsCall:
             results.append(data.get("id"))
 
         tasks = [
-            client.post(
+            initialized_client.post(
                 "/mcp",
                 json={
                     "jsonrpc": "2.0",
@@ -336,6 +385,7 @@ class TestToolsCall:
                     },
                     "id": i,
                 },
+                headers={"Mcp-Session-Id": initialized_client.session_id},
             )
             for i in range(5)
         ]

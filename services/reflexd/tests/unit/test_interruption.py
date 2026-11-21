@@ -159,8 +159,12 @@ class TestPreemptLowerPriority:
                 second_cancelled = True
                 raise
 
-        on_event("first_event", priority=1, conflict_group="head_movement")(first_handler)
-        on_event("second_event", priority=1, conflict_group="head_movement")(second_handler)
+        on_event("first_event", priority=1, conflict_group="head_movement")(
+            first_handler
+        )
+        on_event("second_event", priority=1, conflict_group="head_movement")(
+            second_handler
+        )
 
         with patch("reflexd.server.get_gateway_client", return_value=mock_client):
             first_task = asyncio.create_task(handle_inject_event("first_event", {}))

@@ -24,7 +24,6 @@ def reset_registry_main():
 
 
 class TestLoadReflexes:
-
     @pytest.mark.asyncio
     async def test_load_reflexes_loads_modules(self, tmp_path):
         reflexes_dir = tmp_path / "reflexes"
@@ -71,7 +70,10 @@ class TestLoadReflexes:
 
         (reflexes_dir / "bad_reflex.py").write_text("import nonexistent_module\n")
 
-        with patch("reflexd.main.REFLEXES_DIR", str(reflexes_dir)), caplog.at_level(logging.ERROR):
+        with (
+            patch("reflexd.main.REFLEXES_DIR", str(reflexes_dir)),
+            caplog.at_level(logging.ERROR),
+        ):
             await load_reflexes()
 
         assert "Error loading reflex bad_reflex" in caplog.text
@@ -80,7 +82,10 @@ class TestLoadReflexes:
     async def test_load_reflexes_warns_on_missing_directory(self, tmp_path, caplog):
         nonexistent_dir = tmp_path / "nonexistent"
 
-        with patch("reflexd.main.REFLEXES_DIR", str(nonexistent_dir)), caplog.at_level(logging.WARNING):
+        with (
+            patch("reflexd.main.REFLEXES_DIR", str(nonexistent_dir)),
+            caplog.at_level(logging.WARNING),
+        ):
             await load_reflexes()
 
         assert "Reflexes directory not found" in caplog.text
@@ -131,8 +136,10 @@ class TestJSONFormatter:
 
 class TestSetupLogging:
     def test_setup_logging_text_format(self):
-        with patch.dict("os.environ", {"LOG_FORMAT": "text"}, clear=True), \
-             patch("logging.basicConfig") as mock_basic:
+        with (
+            patch.dict("os.environ", {"LOG_FORMAT": "text"}, clear=True),
+            patch("logging.basicConfig") as mock_basic,
+        ):
             setup_logging()
             mock_basic.assert_called_once()
             _args, kwargs = mock_basic.call_args
@@ -140,8 +147,10 @@ class TestSetupLogging:
             assert len(kwargs["handlers"]) == 1
 
     def test_setup_logging_json_format(self):
-        with patch.dict("os.environ", {"LOG_FORMAT": "json"}, clear=True), \
-             patch("logging.basicConfig") as mock_basic:
+        with (
+            patch.dict("os.environ", {"LOG_FORMAT": "json"}, clear=True),
+            patch("logging.basicConfig") as mock_basic,
+        ):
             setup_logging()
             mock_basic.assert_called_once()
             _args, kwargs = mock_basic.call_args
@@ -186,14 +195,15 @@ class TestShutdown:
 
         mock_app = MagicMock()
 
-        with patch("reflexd.main.STACKCHAN_TOKEN", "test-token"), \
-             patch("reflexd.main.GatewayClient", return_value=mock_client), \
-             patch("reflexd.main.create_app", return_value=mock_app), \
-             patch("aiohttp.web.AppRunner", return_value=mock_runner), \
-             patch("aiohttp.web.TCPSite", return_value=mock_site), \
-             patch("asyncio.get_running_loop") as mock_get_loop, \
-             patch.object(_shutdown_event, "wait", side_effect=KeyboardInterrupt()):
-
+        with (
+            patch("reflexd.main.STACKCHAN_TOKEN", "test-token"),
+            patch("reflexd.main.GatewayClient", return_value=mock_client),
+            patch("reflexd.main.create_app", return_value=mock_app),
+            patch("aiohttp.web.AppRunner", return_value=mock_runner),
+            patch("aiohttp.web.TCPSite", return_value=mock_site),
+            patch("asyncio.get_running_loop") as mock_get_loop,
+            patch.object(_shutdown_event, "wait", side_effect=KeyboardInterrupt()),
+        ):
             mock_loop = MagicMock()
             mock_loop.add_signal_handler.side_effect = NotImplementedError()
             mock_get_loop.return_value = mock_loop
@@ -228,13 +238,14 @@ class TestMain:
 
         mock_app = MagicMock()
 
-        with patch("reflexd.main.STACKCHAN_TOKEN", "test-token"), \
-             patch("reflexd.main.GatewayClient", return_value=mock_client), \
-             patch("reflexd.main.create_app", return_value=mock_app), \
-             patch("aiohttp.web.AppRunner", return_value=mock_runner), \
-             patch("aiohttp.web.TCPSite", return_value=mock_site), \
-             patch.object(_shutdown_event, "wait", side_effect=KeyboardInterrupt()):
-
+        with (
+            patch("reflexd.main.STACKCHAN_TOKEN", "test-token"),
+            patch("reflexd.main.GatewayClient", return_value=mock_client),
+            patch("reflexd.main.create_app", return_value=mock_app),
+            patch("aiohttp.web.AppRunner", return_value=mock_runner),
+            patch("aiohttp.web.TCPSite", return_value=mock_site),
+            patch.object(_shutdown_event, "wait", side_effect=KeyboardInterrupt()),
+        ):
             await main()
 
         mock_client.connect_with_retry.assert_called_once()
@@ -246,11 +257,15 @@ class TestMain:
     @pytest.mark.asyncio
     async def test_main_exits_on_gateway_connection_failure(self, caplog):
         mock_client = AsyncMock()
-        mock_client.connect_with_retry.side_effect = RuntimeError("Failed to connect to gateway after 5 attempts: Connection failed")
+        mock_client.connect_with_retry.side_effect = RuntimeError(
+            "Failed to connect to gateway after 5 attempts: Connection failed"
+        )
 
-        with patch("reflexd.main.STACKCHAN_TOKEN", "test-token"), \
-             patch("reflexd.main.GatewayClient", return_value=mock_client), \
-             pytest.raises(SystemExit) as exc_info:
+        with (
+            patch("reflexd.main.STACKCHAN_TOKEN", "test-token"),
+            patch("reflexd.main.GatewayClient", return_value=mock_client),
+            pytest.raises(SystemExit) as exc_info,
+        ):
             await main()
 
         assert exc_info.value.code == 1

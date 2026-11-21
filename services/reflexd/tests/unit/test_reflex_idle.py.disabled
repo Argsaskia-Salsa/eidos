@@ -18,8 +18,9 @@ async def test_idle_runs_loop():
     mock_call = AsyncMock()
     mock_sleep = AsyncMock(side_effect=[None, asyncio.CancelledError()])
 
-    with patch("reflexd.call", mock_call), patch(
-        "reflexes.idle.asyncio.sleep", mock_sleep
+    with (
+        patch("reflexd.call", mock_call),
+        patch("reflexes.idle.asyncio.sleep", mock_sleep),
     ):
         import importlib
 
@@ -48,8 +49,9 @@ async def test_idle_cancelled_returns_neutral():
     mock_call = AsyncMock()
     mock_sleep = AsyncMock(side_effect=asyncio.CancelledError())
 
-    with patch("reflexd.call", mock_call), patch(
-        "reflexes.idle.asyncio.sleep", mock_sleep
+    with (
+        patch("reflexd.call", mock_call),
+        patch("reflexes.idle.asyncio.sleep", mock_sleep),
     ):
         import importlib
 

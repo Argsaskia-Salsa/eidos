@@ -42,7 +42,7 @@ async def led_frame_generator() -> AsyncGenerator[str, None]:
         frame = {
             "ts": time.time(),
             "kind": "continuous",
-            "colors": PATTERNS[pattern_idx]
+            "colors": PATTERNS[pattern_idx],
         }
         yield json.dumps(frame)
         pattern_idx = (pattern_idx + 1) % len(PATTERNS)
@@ -54,7 +54,7 @@ async def handler(websocket):
     client_ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
     print(f"Gateway connected from {client_ip}")
     frame_count = 0
-    
+
     try:
         async for frame_json in led_frame_generator():
             await websocket.send(frame_json)
@@ -62,7 +62,9 @@ async def handler(websocket):
             if frame_count % 20 == 0:
                 print(f"Sent {frame_count} frames")
     except websockets.exceptions.ConnectionClosed as e:
-        print(f"Gateway disconnected from {client_ip} (code={e.code}, reason={e.reason})")
+        print(
+            f"Gateway disconnected from {client_ip} (code={e.code}, reason={e.reason})"
+        )
     except Exception as e:
         print(f"Error with {client_ip}: {e}")
 
@@ -84,7 +86,7 @@ async def main():
 
     async with websockets.serve(handler, WS_HOST, WS_PORT):
         await shutdown_event.wait()
-    
+
     print("\nServer stopped")
 
 

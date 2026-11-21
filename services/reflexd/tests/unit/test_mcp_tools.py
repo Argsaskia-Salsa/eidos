@@ -7,7 +7,7 @@ from aiohttp import web
 
 from reflexd.gateway_client import GatewayClient
 from reflexd.registry import clear, on_event
-from reflexd.server import _running, handle_jsonrpc
+from reflexd.server import _running, _create_session, _get_session, handle_jsonrpc
 
 
 @pytest.fixture(autouse=True)
@@ -37,68 +37,95 @@ class TestMCPTools:
         on_event("test_event")(handler)
 
         request = MagicMock(spec=web.Request)
-        request.json = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {"name": "cancel_reflex", "arguments": {"name": "test_event"}},
-            "id": 1,
-        })
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "cancel_reflex",
+                    "arguments": {"name": "test_event"},
+                },
+                "id": 1,
+            }
+        )
+        session_id = await _create_session()
+        request.headers = {"Mcp-Session-Id": session_id}
 
         with patch("reflexd.server.get_gateway_client", return_value=mock_client):
-            task = asyncio.create_task(handle_inject_event("test_event", {}))
-            await asyncio.sleep(0.01)
+            with patch(
+                "reflexd.server._get_session", return_value={"created": 0, "data": {}}
+            ):
+                task = asyncio.create_task(handle_inject_event("test_event", {}))
+                await asyncio.sleep(0.01)
 
-            resp = await handle_jsonrpc(request)
+                resp = await handle_jsonrpc(request)
 
-            assert resp.status == 200
-            data = json.loads(resp.text)
-            assert data["result"]["status"] == "ok"
-            assert data["result"]["cancelled"] is True
+                assert resp.status == 200
+                data = json.loads(resp.text)
+                assert data["result"]["status"] == "ok"
+                assert data["result"]["cancelled"] is True
 
-            try:
-                await task
-            except Exception:  # noqa: BLE001,S110 - ignore cleanup errors in test
-                pass
+                try:
+                    await task
+                except Exception:  # noqa: BLE001,S110 - ignore cleanup errors in test
+                    pass
 
     @pytest.mark.asyncio
     async def test_cancel_reflex_tool_not_found(self):
         mock_client = AsyncMock(spec=GatewayClient)
 
         request = MagicMock(spec=web.Request)
-        request.json = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {"name": "cancel_reflex", "arguments": {"name": "nonexistent"}},
-            "id": 1,
-        })
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "cancel_reflex",
+                    "arguments": {"name": "nonexistent"},
+                },
+                "id": 1,
+            }
+        )
+        session_id = await _create_session()
+        request.headers = {"Mcp-Session-Id": session_id}
 
         with patch("reflexd.server.get_gateway_client", return_value=mock_client):
-            resp = await handle_jsonrpc(request)
+            with patch(
+                "reflexd.server._get_session", return_value={"created": 0, "data": {}}
+            ):
+                resp = await handle_jsonrpc(request)
 
-            assert resp.status == 200
-            data = json.loads(resp.text)
-            assert data["result"]["status"] == "ok"
-            assert data["result"]["cancelled"] is False
+                assert resp.status == 200
+                data = json.loads(resp.text)
+                assert data["result"]["status"] == "ok"
+                assert data["result"]["cancelled"] is False
 
     @pytest.mark.asyncio
     async def test_cancel_reflex_tool_missing_name(self):
         mock_client = AsyncMock(spec=GatewayClient)
 
         request = MagicMock(spec=web.Request)
-        request.json = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {"name": "cancel_reflex", "arguments": {}},
-            "id": 1,
-        })
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "cancel_reflex", "arguments": {}},
+                "id": 1,
+            }
+        )
+        session_id = await _create_session()
+        request.headers = {"Mcp-Session-Id": session_id}
 
         with patch("reflexd.server.get_gateway_client", return_value=mock_client):
-            resp = await handle_jsonrpc(request)
+            with patch(
+                "reflexd.server._get_session", return_value={"created": 0, "data": {}}
+            ):
+                resp = await handle_jsonrpc(request)
 
-            assert resp.status == 400
-            data = json.loads(resp.text)
-            assert data["error"]["code"] == -32602
-            assert "Missing reflex name" in data["error"]["message"]
+                assert resp.status == 400
+                data = json.loads(resp.text)
+                assert data["error"]["code"] == -32602
+                assert "Missing reflex name" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_list_running_reflexes_tool(self):
@@ -114,29 +141,36 @@ class TestMCPTools:
         on_event("event2")(handler2)
 
         request = MagicMock(spec=web.Request)
-        request.json = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {"name": "list_running_reflexes", "arguments": {}},
-            "id": 1,
-        })
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "list_running_reflexes", "arguments": {}},
+                "id": 1,
+            }
+        )
+        session_id = await _create_session()
+        request.headers = {"Mcp-Session-Id": session_id}
 
         with patch("reflexd.server.get_gateway_client", return_value=mock_client):
-            task1 = asyncio.create_task(handle_inject_event("event1", {}))
-            task2 = asyncio.create_task(handle_inject_event("event2", {}))
-            await asyncio.sleep(0.01)
+            with patch(
+                "reflexd.server._get_session", return_value={"created": 0, "data": {}}
+            ):
+                task1 = asyncio.create_task(handle_inject_event("event1", {}))
+                task2 = asyncio.create_task(handle_inject_event("event2", {}))
+                await asyncio.sleep(0.01)
 
-            resp = await handle_jsonrpc(request)
+                resp = await handle_jsonrpc(request)
 
-            assert resp.status == 200
-            data = json.loads(resp.text)
-            assert set(data["result"]["running"]) == {"event1", "event2"}
+                assert resp.status == 200
+                data = json.loads(resp.text)
+                assert set(data["result"]["running"]) == {"event1", "event2"}
 
-            for task in [task1, task2]:
-                try:
-                    await task
-                except Exception:  # noqa: BLE001,S110 - ignore cleanup errors in test
-                    pass
+                for task in [task1, task2]:
+                    try:
+                        await task
+                    except Exception:  # noqa: BLE001,S110 - ignore cleanup errors in test
+                        pass
 
 
 # Import handle_inject_event for the tests above

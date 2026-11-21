@@ -4,7 +4,7 @@ Pure functions returning list[Frame] where Frame = list[list[int]] (LED x RGB).
 """
 
 import math
-from typing import Callable
+from collections.abc import Callable
 
 from .config import CONFIG
 
@@ -53,7 +53,9 @@ def pattern_rainbow(num_leds: int = NUM_LEDS) -> list[Frame]:
     return patterns
 
 
-def pattern_breathing(num_leds: int = NUM_LEDS, color: list[int] = [0, 180, 255]) -> list[Frame]:
+def pattern_breathing(
+    num_leds: int = NUM_LEDS, color: list[int] = [0, 180, 255]
+) -> list[Frame]:
     """All LEDs breathe together."""
     patterns = []
     frames = 60
@@ -66,7 +68,9 @@ def pattern_breathing(num_leds: int = NUM_LEDS, color: list[int] = [0, 180, 255]
     return patterns
 
 
-def pattern_kitt(num_leds: int = NUM_LEDS, color: list[int] = [255, 0, 0], tail: float = 0.5) -> list[Frame]:
+def pattern_kitt(
+    num_leds: int = NUM_LEDS, color: list[int] = [255, 0, 0], tail: float = 0.5
+) -> list[Frame]:
     """KITT scanner back and forth."""
     patterns = []
     # Forward
@@ -77,7 +81,7 @@ def pattern_kitt(num_leds: int = NUM_LEDS, color: list[int] = [255, 0, 0], tail:
             if dist == 0:
                 colors[i] = color[:]
             elif dist <= 3:
-                fade = tail ** dist
+                fade = tail**dist
                 colors[i] = [int(c * fade) for c in color]
         patterns.append(colors)
     # Backward
@@ -88,13 +92,15 @@ def pattern_kitt(num_leds: int = NUM_LEDS, color: list[int] = [255, 0, 0], tail:
             if dist == 0:
                 colors[i] = color[:]
             elif dist <= 3:
-                fade = tail ** dist
+                fade = tail**dist
                 colors[i] = [int(c * fade) for c in color]
         patterns.append(colors)
     return patterns
 
 
-def pattern_solid(num_leds: int = NUM_LEDS, color: list[int] = [255, 255, 255]) -> list[Frame]:
+def pattern_solid(
+    num_leds: int = NUM_LEDS, color: list[int] = [255, 255, 255]
+) -> list[Frame]:
     """Single solid color frame."""
     return [[color[:] for _ in range(num_leds)]]
 
@@ -110,7 +116,10 @@ from ..base.registry import SpecProtocol
 
 class LEDPatternSpec:
     """Pattern specification with metadata for CLI generation."""
-    def __init__(self, name: str, func: Callable, args: dict | None = None, description: str = ""):
+
+    def __init__(
+        self, name: str, func: Callable, args: dict | None = None, description: str = ""
+    ):
         self.name = name
         self.func = func
         self.args = args or {}
@@ -121,8 +130,20 @@ class LEDPatternSpec:
 BUILTIN_PATTERNS: dict[str, SpecProtocol] = {
     "cycle": LEDPatternSpec("cycle", pattern_cycle, {}, "Sequential 1→2→...→N"),
     "rainbow": LEDPatternSpec("rainbow", pattern_rainbow, {}, "Flowing rainbow wave"),
-    "breathing": LEDPatternSpec("breathing", pattern_breathing, {"color": [0, 180, 255]}, "All LEDs breathe together"),
-    "kitt": LEDPatternSpec("kitt", pattern_kitt, {"color": [255, 0, 0], "tail": 0.5}, "KITT scanner back and forth"),
-    "solid": LEDPatternSpec("solid", pattern_solid, {"color": [255, 255, 255]}, "Single solid color"),
+    "breathing": LEDPatternSpec(
+        "breathing",
+        pattern_breathing,
+        {"color": [0, 180, 255]},
+        "All LEDs breathe together",
+    ),
+    "kitt": LEDPatternSpec(
+        "kitt",
+        pattern_kitt,
+        {"color": [255, 0, 0], "tail": 0.5},
+        "KITT scanner back and forth",
+    ),
+    "solid": LEDPatternSpec(
+        "solid", pattern_solid, {"color": [255, 255, 255]}, "Single solid color"
+    ),
     "off": LEDPatternSpec("off", pattern_off, {}, "All LEDs off"),
 }

@@ -109,14 +109,18 @@ async def main() -> None:
     app = create_app()
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", REFLEXD_MCP_PORT, reuse_address=True, reuse_port=True)
+    site = web.TCPSite(
+        runner, "0.0.0.0", REFLEXD_MCP_PORT, reuse_address=True, reuse_port=True
+    )
     await site.start()
     logger.info("Reflexd MCP server running on port %d", REFLEXD_MCP_PORT)
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(client, runner)))
+            loop.add_signal_handler(
+                sig, lambda: asyncio.create_task(shutdown(client, runner))
+            )
         except NotImplementedError:
             pass
 

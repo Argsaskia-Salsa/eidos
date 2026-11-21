@@ -158,8 +158,9 @@ class TestHandleCall:
 
     @pytest.mark.asyncio
     async def test_handle_call_raises_if_no_gateway(self):
-        with patch("reflexd.server.get_gateway_client", return_value=None), pytest.raises(
-            RuntimeError, match="Gateway client not connected"
+        with (
+            patch("reflexd.server.get_gateway_client", return_value=None),
+            pytest.raises(RuntimeError, match="Gateway client not connected"),
         ):
             await handle_call("set_avatar", {"face": "happy"})
 
@@ -286,20 +287,30 @@ class TestHandleJsonRpc:
     @pytest.mark.asyncio
     async def test_handle_jsonrpc_inject_event_missing_name(self):
         import json
-        from unittest.mock import MagicMock
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from aiohttp import web
 
-        request = MagicMock(spec=web.Request)
-        request.json = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {"name": "inject_event", "arguments": {"data": {}}},
-            "id": 1,
-        })
+        from reflexd.server import _create_session, _get_session
 
-        from reflexd.server import handle_jsonrpc
-        resp = await handle_jsonrpc(request)
+        request = MagicMock(spec=web.Request)
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "inject_event", "arguments": {"data": {}}},
+                "id": 1,
+            }
+        )
+        session_id = await _create_session()
+        request.headers = {"Mcp-Session-Id": session_id}
+
+        with patch(
+            "reflexd.server._get_session", return_value={"created": 0, "data": {}}
+        ):
+            from reflexd.server import handle_jsonrpc
+
+            resp = await handle_jsonrpc(request)
 
         assert resp.status == 400
         data = json.loads(resp.text)
@@ -310,20 +321,30 @@ class TestHandleJsonRpc:
     @pytest.mark.asyncio
     async def test_handle_jsonrpc_call_missing_tool(self):
         import json
-        from unittest.mock import MagicMock
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from aiohttp import web
 
-        request = MagicMock(spec=web.Request)
-        request.json = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {"name": "call", "arguments": {"arguments": {}}},
-            "id": 1,
-        })
+        from reflexd.server import _create_session, _get_session
 
-        from reflexd.server import handle_jsonrpc
-        resp = await handle_jsonrpc(request)
+        request = MagicMock(spec=web.Request)
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "call", "arguments": {"arguments": {}}},
+                "id": 1,
+            }
+        )
+        session_id = await _create_session()
+        request.headers = {"Mcp-Session-Id": session_id}
+
+        with patch(
+            "reflexd.server._get_session", return_value={"created": 0, "data": {}}
+        ):
+            from reflexd.server import handle_jsonrpc
+
+            resp = await handle_jsonrpc(request)
 
         assert resp.status == 400
         data = json.loads(resp.text)
@@ -334,27 +355,42 @@ class TestHandleJsonRpc:
     @pytest.mark.asyncio
     async def test_handle_jsonrpc_user_response(self):
         import json
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from aiohttp import web
 
         from reflexd.registry import on_event
+        from reflexd.server import _create_session, _get_session
 
         @on_event("user_response")
         async def handler(data):
             return {"handled": True}
 
         request = MagicMock(spec=web.Request)
-        request.json = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {"name": "user_response", "arguments": {"data": {"text": "hello"}}},
-            "id": 1,
-        })
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "user_response",
+                    "arguments": {"data": {"text": "hello"}},
+                },
+                "id": 1,
+            }
+        )
+        session_id = await _create_session()
+        request.headers = {"Mcp-Session-Id": session_id}
 
-        from reflexd.server import handle_jsonrpc
-        with patch("reflexd.server.get_gateway_client", return_value=AsyncMock(spec=GatewayClient)):
-            resp = await handle_jsonrpc(request)
+        with patch(
+            "reflexd.server.get_gateway_client",
+            return_value=AsyncMock(spec=GatewayClient),
+        ):
+            with patch(
+                "reflexd.server._get_session", return_value={"created": 0, "data": {}}
+            ):
+                from reflexd.server import handle_jsonrpc
+
+                resp = await handle_jsonrpc(request)
 
         assert resp.status == 200
         data = json.loads(resp.text)
@@ -363,27 +399,39 @@ class TestHandleJsonRpc:
     @pytest.mark.asyncio
     async def test_handle_jsonrpc_thinking_end(self):
         import json
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from aiohttp import web
 
         from reflexd.registry import on_event
+        from reflexd.server import _create_session, _get_session
 
         @on_event("thinking_end")
         async def handler(data):
             return {"handled": True}
 
         request = MagicMock(spec=web.Request)
-        request.json = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {"name": "thinking_end", "arguments": {}},
-            "id": 1,
-        })
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "thinking_end", "arguments": {}},
+                "id": 1,
+            }
+        )
+        session_id = await _create_session()
+        request.headers = {"Mcp-Session-Id": session_id}
 
-        from reflexd.server import handle_jsonrpc
-        with patch("reflexd.server.get_gateway_client", return_value=AsyncMock(spec=GatewayClient)):
-            resp = await handle_jsonrpc(request)
+        with patch(
+            "reflexd.server.get_gateway_client",
+            return_value=AsyncMock(spec=GatewayClient),
+        ):
+            with patch(
+                "reflexd.server._get_session", return_value={"created": 0, "data": {}}
+            ):
+                from reflexd.server import handle_jsonrpc
+
+                resp = await handle_jsonrpc(request)
 
         assert resp.status == 200
         data = json.loads(resp.text)
@@ -392,24 +440,37 @@ class TestHandleJsonRpc:
     @pytest.mark.asyncio
     async def test_handle_jsonrpc_exception_handling(self):
         import json
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from aiohttp import web
 
-        request = MagicMock(spec=web.Request)
-        request.json = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {"name": "call", "arguments": {"tool": "set_avatar", "arguments": {"face": "happy"}}},
-            "id": 1,
-        })
+        from reflexd.server import _create_session, _get_session
 
-        from reflexd.server import handle_jsonrpc
+        request = MagicMock(spec=web.Request)
+        request.json = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "call",
+                    "arguments": {"tool": "set_avatar", "arguments": {"face": "happy"}},
+                },
+                "id": 1,
+            }
+        )
+        session_id = await _create_session()
+        request.headers = {"Mcp-Session-Id": session_id}
+
         mock_client = AsyncMock(spec=GatewayClient)
         mock_client.call.side_effect = RuntimeError("Gateway down")
 
         with patch("reflexd.server.get_gateway_client", return_value=mock_client):
-            resp = await handle_jsonrpc(request)
+            with patch(
+                "reflexd.server._get_session", return_value={"created": 0, "data": {}}
+            ):
+                from reflexd.server import handle_jsonrpc
+
+                resp = await handle_jsonrpc(request)
 
         assert resp.status == 500
         data = json.loads(resp.text)

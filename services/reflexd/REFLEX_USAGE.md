@@ -17,11 +17,13 @@ The reflex system provides event-driven behavior for the robot with support for:
 ```python
 from reflexd import call, on_event, on_cleanup
 
+
 @on_event("my_event", priority=5, conflict_group="group_name")
 async def on_my_event(data: dict):
     # data contains event payload
     await call("set_avatar", face="happy")
     await call("move_head", yaw=10, pitch=12)
+
 
 @on_cleanup("my_event")
 async def cleanup_my_event():
@@ -45,18 +47,21 @@ async def cleanup_my_event():
 ```python
 from reflexd import call, on_event, on_cleanup, trigger_event
 
+
 @on_event("thinking_start", priority=10, conflict_group="head_movement")
 async def on_thinking_start(_event):
     await call("set_avatar", face="thinking")
     await call("set_all_leds", r=255, g=0, b=0)
-    
+
     # Trigger another reflex explicitly
     await trigger_event("led_rainbow_start", {})
+
 
 @on_event("led_rainbow_start", priority=5)
 async def on_led_rainbow_start(_event):
     # This runs asynchronously, non-blocking
     asyncio.create_task(_rainbow_loop())
+
 
 @on_cleanup("thinking_start")
 async def cleanup_thinking():
@@ -83,6 +88,7 @@ async def on_idle(_event):
         await call("move_head", yaw=random.randint(-30, 30), pitch=12)
         await asyncio.sleep(random.uniform(2, 5))
 
+
 # High priority thinking - preempts idle
 @on_event("thinking_start", priority=10, conflict_group="head_movement")
 async def on_thinking_start(_event):
@@ -107,18 +113,21 @@ async def on_thinking_start(_event):
 async def on_look_left(_event):
     await call("move_head", yaw=-45, pitch=12)
 
+
 @on_event("look_right", priority=5, conflict_group="head_movement")
 async def on_look_right(_event):
     await call("move_head", yaw=45, pitch=12)
+
 
 # LED group - independent from head
 @on_event("led_red", priority=5, conflict_group="leds")
 async def on_led_red(_event):
     await call("set_all_leds", r=255, g=0, b=0)
 
+
 # These can run simultaneously (different conflict_groups)
-await trigger_event("look_left", {})   # Uses head_movement
-await trigger_event("led_red", {})     # Uses leds - runs in parallel!
+await trigger_event("look_left", {})  # Uses head_movement
+await trigger_event("led_red", {})  # Uses leds - runs in parallel!
 ```
 
 ---
@@ -182,6 +191,7 @@ import random
 
 DEFAULT_PITCH = 12
 
+
 # 1. Idle behavior (low priority, yields to everything)
 @on_event("idle_tick", priority=1, conflict_group="head_movement")
 async def on_idle(_event):
@@ -194,9 +204,11 @@ async def on_idle(_event):
         await call("move_head", yaw=0, pitch=DEFAULT_PITCH)
         raise
 
+
 @on_cleanup("idle_tick")
 async def cleanup_idle():
     await call("move_head", yaw=0, pitch=DEFAULT_PITCH)
+
 
 # 2. User interaction (medium priority)
 @on_event("user_message", priority=5, conflict_group="head_movement")
@@ -206,10 +218,12 @@ async def on_user_message(_event):
     # Trigger greeting LED
     await trigger_event("greeting_led", {})
 
+
 @on_cleanup("user_message")
 async def cleanup_user_message():
     await call("set_avatar", face="neutral")
     await call("move_head", yaw=0, pitch=DEFAULT_PITCH)
+
 
 @on_event("greeting_led", priority=3, conflict_group="leds")
 async def on_greeting_led(_event):
@@ -219,12 +233,14 @@ async def on_greeting_led(_event):
         await call("set_all_leds", r=0, g=0, b=0)
         await asyncio.sleep(0.2)
 
+
 # 3. Thinking (high priority, preempts user_message and idle)
 @on_event("thinking_start", priority=10, conflict_group="head_movement")
 async def on_thinking_start(_event):
     await call("set_avatar", face="thinking")
     await call("set_all_leds", r=255, g=0, b=0)
     await trigger_event("led_rainbow", {})
+
 
 @on_cleanup("thinking_start")
 async def cleanup_thinking():
@@ -233,9 +249,17 @@ async def cleanup_thinking():
     await call("move_head", yaw=0, pitch=DEFAULT_PITCH)
     await trigger_event("led_rainbow_stop", {})
 
+
 @on_event("led_rainbow", priority=5, conflict_group="leds")
 async def on_led_rainbow(_event):
-    colors = [(255,0,0), (255,127,0), (255,255,0), (0,255,0), (0,255,255), (0,0,255)]
+    colors = [
+        (255, 0, 0),
+        (255, 127, 0),
+        (255, 255, 0),
+        (0, 255, 0),
+        (0, 255, 255),
+        (0, 0, 255),
+    ]
     idx = 0
     try:
         while True:
@@ -245,6 +269,7 @@ async def on_led_rainbow(_event):
             await asyncio.sleep(0.2)
     except asyncio.CancelledError:
         raise
+
 
 @on_cleanup("led_rainbow")
 async def cleanup_led_rainbow():

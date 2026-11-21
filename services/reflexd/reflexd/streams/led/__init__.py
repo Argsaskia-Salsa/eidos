@@ -2,17 +2,17 @@
 LED Stream Package - unified API for LED streaming.
 """
 
-from .server import LEDStreamServer
-from .registry import LEDPatternRegistry, PATTERNS, PATTERN_SPECS, reload_all_patterns
-from .client import LEDStreamClient
 from .cli import main
+from .client import LEDStreamClient
+from .registry import PATTERN_SPECS, PATTERNS, LEDPatternRegistry, reload_all_patterns
+from .server import LEDStreamServer
 
 __all__ = [
-    "LEDStreamServer",
-    "LEDPatternRegistry",
     "PATTERNS",
     "PATTERN_SPECS",
-    "reload_all_patterns",
+    "LEDPatternRegistry",
     "LEDStreamClient",
+    "LEDStreamServer",
     "main",  # CLI entrypoint
+    "reload_all_patterns",
 ]

@@ -11,6 +11,7 @@ class TestCircuitBreaker:
     @pytest.fixture(autouse=True)
     def reset_circuit_breaker(self):
         import reflexd.circuit_breaker as cb
+
         cb._circuit_breaker = None
         yield
         cb._circuit_breaker = None
@@ -75,7 +76,9 @@ class TestCircuitBreaker:
 
     @pytest.mark.asyncio
     async def test_half_open_limits_calls(self):
-        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.01, half_open_max_calls=2)
+        cb = CircuitBreaker(
+            failure_threshold=1, recovery_timeout=0.01, half_open_max_calls=2
+        )
         mock_func = AsyncMock(side_effect=ValueError("test error"))
         with pytest.raises(ValueError):
             await cb.call(mock_func)
@@ -96,7 +99,9 @@ class TestCircuitBreaker:
         await asyncio.sleep(0.01)
 
         # Third call should be rejected immediately
-        with pytest.raises(RuntimeError, match="Circuit breaker HALF_OPEN limit reached"):
+        with pytest.raises(
+            RuntimeError, match="Circuit breaker HALF_OPEN limit reached"
+        ):
             await cb.call(slow_func)
 
         # Wait for the first two to complete

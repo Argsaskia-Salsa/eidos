@@ -146,6 +146,7 @@ class TestGatewayClient:
     @pytest.mark.asyncio
     async def test_call_enforces_rate_limit(self, gateway_client):
         from unittest.mock import Mock
+
         gateway_client.session = Mock()
         gateway_client.session_id = "test-session-id"
 
@@ -178,6 +179,7 @@ class TestGatewayClient:
     @pytest.mark.asyncio
     async def test_call_enforces_rate_limit_shared_across_tools(self, gateway_client):
         from unittest.mock import Mock
+
         gateway_client.session = Mock()
         gateway_client.session_id = "test-session-id"
 
@@ -332,9 +334,13 @@ class TestConnectWithRetry:
             aiohttp.ClientError("Connection failed"),
             None,
         ]
-        with patch.object(client, "connect", mock_connect), \
-             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-            await client.connect_with_retry(max_attempts=5, base_delay=0.01, max_delay=0.1)
+        with (
+            patch.object(client, "connect", mock_connect),
+            patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
+            await client.connect_with_retry(
+                max_attempts=5, base_delay=0.01, max_delay=0.1
+            )
             assert mock_connect.call_count == 3
             assert mock_sleep.call_count == 2
 
@@ -343,10 +349,16 @@ class TestConnectWithRetry:
         client = GatewayClient("http://test-gateway:8767/mcp", "test-token")
         mock_connect = AsyncMock()
         mock_connect.side_effect = aiohttp.ClientError("Connection failed")
-        with patch.object(client, "connect", mock_connect), \
-             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-            with pytest.raises(RuntimeError, match="Failed to connect to gateway after 3 attempts"):
-                await client.connect_with_retry(max_attempts=3, base_delay=0.01, max_delay=0.1)
+        with (
+            patch.object(client, "connect", mock_connect),
+            patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
+            with pytest.raises(
+                RuntimeError, match="Failed to connect to gateway after 3 attempts"
+            ):
+                await client.connect_with_retry(
+                    max_attempts=3, base_delay=0.01, max_delay=0.1
+                )
             assert mock_connect.call_count == 3
             assert mock_sleep.call_count == 2
 
@@ -355,10 +367,16 @@ class TestConnectWithRetry:
         client = GatewayClient("http://test-gateway:8767/mcp", "test-token")
         mock_connect = AsyncMock()
         mock_connect.side_effect = OSError("Network error")
-        with patch.object(client, "connect", mock_connect), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
-            with pytest.raises(RuntimeError, match="Failed to connect to gateway after 2 attempts"):
-                await client.connect_with_retry(max_attempts=2, base_delay=0.01, max_delay=0.1)
+        with (
+            patch.object(client, "connect", mock_connect),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            with pytest.raises(
+                RuntimeError, match="Failed to connect to gateway after 2 attempts"
+            ):
+                await client.connect_with_retry(
+                    max_attempts=2, base_delay=0.01, max_delay=0.1
+                )
             assert mock_connect.call_count == 2
 
     @pytest.mark.asyncio
@@ -366,23 +384,32 @@ class TestConnectWithRetry:
         client = GatewayClient("http://test-gateway:8767/mcp", "test-token")
         mock_connect = AsyncMock()
         mock_connect.side_effect = TimeoutError()
-        with patch.object(client, "connect", mock_connect), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
-            with pytest.raises(RuntimeError, match="Failed to connect to gateway after 2 attempts"):
-                await client.connect_with_retry(max_attempts=2, base_delay=0.01, max_delay=0.1)
+        with (
+            patch.object(client, "connect", mock_connect),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            with pytest.raises(
+                RuntimeError, match="Failed to connect to gateway after 2 attempts"
+            ):
+                await client.connect_with_retry(
+                    max_attempts=2, base_delay=0.01, max_delay=0.1
+                )
             assert mock_connect.call_count == 2
 
 
 class TestGatewayClientModule:
     def test_get_gateway_client_returns_none_by_default(self):
         from reflexd.gateway_client import _gateway_client, get_gateway_client
+
         original = _gateway_client
         try:
             import reflexd.gateway_client as gc
+
             gc._gateway_client = None
             assert get_gateway_client() is None
         finally:
             import reflexd.gateway_client as gc
+
             gc._gateway_client = original
 
     def test_set_gateway_client_sets_global(self):
@@ -391,6 +418,7 @@ class TestGatewayClientModule:
             get_gateway_client,
             set_gateway_client,
         )
+
         original = _gateway_client
         try:
             mock_client = AsyncMock()
@@ -398,6 +426,7 @@ class TestGatewayClientModule:
             assert get_gateway_client() is mock_client
         finally:
             import reflexd.gateway_client as gc
+
             gc._gateway_client = original
 
 
@@ -405,6 +434,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_rate_limiter_enforces_min_interval(self):
         from reflexd.gateway_client import RateLimiter
+
         limiter = RateLimiter(2.0)
 
         start = time.monotonic()
@@ -418,6 +448,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_rate_limiter_first_call_no_delay(self):
         from reflexd.gateway_client import RateLimiter
+
         limiter = RateLimiter(10.0)
 
         start = time.monotonic()
@@ -429,6 +460,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_rate_limiter_thread_safe(self):
         from reflexd.gateway_client import RateLimiter
+
         limiter = RateLimiter(100.0)
 
         async def acquire_n(n):
