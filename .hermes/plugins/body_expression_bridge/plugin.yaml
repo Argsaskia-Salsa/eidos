@@ -1,10 +1,10 @@
 name: body-expression-bridge
-version: "0.2.0"
+version: "0.3.0"
 description: >
   Outbound expression bridge. Forwards Hermes dialogue lifecycle events
   (user_message, user_response, thinking_start/end, stream_*, platform_event,
-  session_end, session_finalize, api_error) to reflexd MCP for expressive-body
-  reactions (animations, speech-gesture sync, attention cues).
+  session_end, session_finalize, api_error) to an events endpoint for
+  expressive-body reactions (animations, speech-gesture sync, attention cues).
   Does NOT provide motor control, sensor ingestion, or LLM tool registration.
 aliases: [body-bridge]
 provides_tools: []
@@ -22,11 +22,27 @@ provides_hooks:
 provides_middleware:
   - llm_execution
 config:
-  REFLEXD_MCP_URL:
+  EVENTS_ENDPOINT_URL:
     type: string
-    default: "http://localhost:8770/mcp"
-    description: "reflexd MCP endpoint URL"
-  REFLEXD_TIMEOUT_SECONDS:
+    default: "http://localhost:8770/events"
+    description: "Events endpoint URL (HTTP POST)"
+  EVENTS_TIMEOUT_SECONDS:
     type: number
     default: 1.0
     description: "HTTP request timeout in seconds"
+  EVENTS_MAX_PENDING:
+    type: integer
+    default: 256
+    description: "Max pending events in queue"
+  EVENTS_SKIP_PLATFORMS:
+    type: string
+    default: "local,desktop,cli"
+    description: "Comma-separated platforms to skip"
+  EVENTS_BREAKER_THRESHOLD:
+    type: integer
+    default: 5
+    description: "Circuit breaker failure threshold"
+  EVENTS_BREAKER_COOLDOWN:
+    type: number
+    default: 10
+    description: "Circuit breaker cooldown in seconds"

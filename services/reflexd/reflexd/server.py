@@ -28,6 +28,40 @@ from typing import TypedDict
 _sessions: dict[str, dict] = {}
 _session_lock = asyncio.Lock()
 
+# Event types that can be received via /events endpoint
+VALID_EVENT_TYPES = {
+    "user_message",
+    "user_response",
+    "thinking_start",
+    "thinking_end",
+    "platform_event",
+    "stream_start",
+    "stream_delta",
+    "stream_end",
+    "session_end",
+    "session_finalize",
+    "api_error",
+}
+
+# Event queue for processing - will be initialized lazily per event loop
+_event_queues: dict[int, asyncio.Queue] = {}
+_event_processor_task: asyncio.Task | None = None
+
+
+def _get_event_queue() -> asyncio.Queue:
+    """Get or create the event queue for the current event loop."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop, create a new one (fallback)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    loop_id = id(loop)
+    if loop_id not in _event_queues:
+        _event_queues[loop_id] = asyncio.Queue()
+    return _event_queues[loop_id]
+
 
 def _new_session_id() -> str:
     return uuid.uuid4().hex
@@ -430,6 +464,90 @@ async def handle_jsonrpc(request: web.Request) -> web.Response:
         )
 
 
+async def handle_events(request: web.Request) -> web.Response:
+    """Handle events from body_expression_bridge via HTTP POST /events."""
+    try:
+        body = await request.json()
+    except (aiohttp.ContentTypeError, ValueError):
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "Invalid JSON",
+            },
+            status=400,
+        )
+
+    event_type = body.get("event_type")
+    payload = body.get("payload", {})
+    meta = body.get("meta", {})
+
+    if not event_type:
+        return web.json_response(
+            {"ok": False, "error": "Missing event_type"},
+            status=400,
+        )
+
+    if event_type not in VALID_EVENT_TYPES:
+        return web.json_response(
+            {"ok": False, "error": f"Unknown event_type: {event_type}"},
+            status=400,
+        )
+
+    # Put event in queue for processing
+    try:
+        await asyncio.wait_for(_get_event_queue().put({
+            "event_type": event_type,
+            "payload": payload,
+            "meta": meta,
+        }), timeout=1.0)
+    except asyncio.TimeoutError:
+        return web.json_response(
+            {"ok": False, "error": "Event queue full"},
+            status=503,
+        )
+
+    return web.json_response({"ok": True})
+
+
+async def _event_processor() -> None:
+    """Background task to process events from queue."""
+    while True:
+        try:
+            event = await asyncio.wait_for(_get_event_queue().get(), timeout=1.0)
+        except asyncio.TimeoutError:
+            continue
+
+        event_type = event["event_type"]
+        payload = event["payload"]
+        meta = event.get("meta", {})
+
+        try:
+            if event_type in ("user_message", "thinking_start"):
+                await handle_inject_event("thinking_start", payload)
+            elif event_type in ("user_response", "thinking_end"):
+                await handle_inject_event("thinking_end", payload)
+            elif event_type == "user_message":
+                await handle_inject_event("user_message", payload)
+            elif event_type == "user_response":
+                await handle_inject_event("user_response", payload)
+            elif event_type == "thinking_start":
+                await handle_inject_event("thinking_start", payload)
+            elif event_type == "thinking_end":
+                await handle_inject_event("thinking_end", payload)
+            else:
+                logger.debug("Unhandled event type: %s", event_type)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Error processing event %s: %s", event_type, e)
+
+
+async def _start_event_processor() -> None:
+    """Start the background event processor task."""
+    global _event_processor_task
+    if _event_processor_task is None or _event_processor_task.done():
+        _event_processor_task = asyncio.create_task(_event_processor())
+        logger.info("Event processor started")
+
+
 async def health_check(request: web.Request) -> web.Response:
     client = get_gateway_client()
     gateway_connected = (
@@ -450,5 +568,7 @@ async def health_check(request: web.Request) -> web.Response:
 def create_app() -> web.Application:
     app = web.Application()
     app.router.add_post("/mcp", handle_jsonrpc)
+    app.router.add_post("/events", handle_events)
     app.router.add_get("/health", health_check)
+    app.on_startup.append(lambda app: _start_event_processor())
     return app

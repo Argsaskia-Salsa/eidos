@@ -1,5 +1,5 @@
 """Body Expression Bridge Plugin — forwards Hermes dialogue lifecycle events
-to reflexd via MCP for expressive-body reactions (animations, speech-gesture
+to an events endpoint for expressive-body reactions (animations, speech-gesture
 sync, attention cues).
 
 Outbound only: this plugin does NOT register tools, does NOT read sensors,
@@ -21,17 +21,16 @@ Hooks:
 Middleware:
 - llm_execution → thinking_start / thinking_end (at exact LLM generation boundaries)
 
-Posts to reflexd MCP (http://localhost:8770/mcp) for reflexd consumption.
+Posts events to HTTP endpoint (default: http://localhost:8770/events).
 
 Configuration:
-- REFLEXD_MCP_URL environment variable (default: http://localhost:8770/mcp)
-- REFLEXD_TIMEOUT_SECONDS environment variable (default: 1.0)
-- REFLEXD_MAX_PENDING environment variable (default: 256)
-- REFLEXD_SKIP_PLATFORMS environment variable (default: local,desktop,cli)
-- REFLEXD_BREAKER_THRESHOLD environment variable (default: 5)
-- REFLEXD_BREAKER_COOLDOWN environment variable (default: 10)
-- REFLEXD_INJECT_TOOL environment variable (default: inject_event)
-- REFLEXD_STREAM_TTL_SECONDS environment variable (default: 300)
+- EVENTS_ENDPOINT_URL environment variable (default: http://localhost:8770/events)
+- EVENTS_TIMEOUT_SECONDS environment variable (default: 1.0)
+- EVENTS_MAX_PENDING environment variable (default: 256)
+- EVENTS_SKIP_PLATFORMS environment variable (default: local,desktop,cli)
+- EVENTS_BREAKER_THRESHOLD environment variable (default: 5)
+- EVENTS_BREAKER_COOLDOWN environment variable (default: 10)
+- EVENTS_MAX_PENDING environment variable (default: 256)
 """
 
 from __future__ import annotations
@@ -58,68 +57,24 @@ _legacy_logger = logging.getLogger("hermes.plugins.body_bridge")
 if _legacy_logger.handlers or _legacy_logger.level == logging.NOTSET:
     _legacy_logger.setLevel(logging.WARNING)
 
-DEFAULT_MCP_URL = "http://localhost:8770/mcp"
+# Configuration
+DEFAULT_EVENTS_ENDPOINT = "http://localhost:8770/events"
 DEFAULT_TIMEOUT = 1.0
 DEFAULT_MAX_PENDING = 256
 DEFAULT_SKIP_PLATFORMS = "local,desktop,cli"
 DEFAULT_BREAKER_THRESHOLD = 5
 DEFAULT_BREAKER_COOLDOWN = 10
-DEFAULT_INJECT_TOOL = "inject_event"
 DEFAULT_STREAM_TTL = 300
 
-_REFLEXD_MCP_URL = os.getenv("REFLEXD_MCP_URL", DEFAULT_MCP_URL)
-
-
-def _env_float(name: str, default: float) -> float:
-    """Parse float from env with warning on invalid value."""
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        logger.warning(
-            "body_expression_bridge: invalid %s=%r, using default %s", name, raw, default
-        )
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    """Parse int from env with warning on invalid value."""
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        logger.warning(
-            "body_expression_bridge: invalid %s=%r, using default %s", name, raw, default
-        )
-        return default
-
-
-def _env_str(name: str, default: str) -> str:
-    """Get string from env with default."""
-    return os.getenv(name, default)
-
-
-_REFLEXD_TIMEOUT = _env_float("REFLEXD_TIMEOUT_SECONDS", DEFAULT_TIMEOUT)
-_REFLEXD_MAX_PENDING = _env_int("REFLEXD_MAX_PENDING", DEFAULT_MAX_PENDING)
-_REFLEXD_BREAKER_THRESHOLD = _env_int(
-    "REFLEXD_BREAKER_THRESHOLD", DEFAULT_BREAKER_THRESHOLD
+_EVENTS_ENDPOINT = os.getenv("EVENTS_ENDPOINT_URL", DEFAULT_EVENTS_ENDPOINT)
+_EVENTS_TIMEOUT = float(os.getenv("EVENTS_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT)))
+_EVENTS_MAX_PENDING = int(os.getenv("EVENTS_MAX_PENDING", str(DEFAULT_MAX_PENDING)))
+_EVENTS_SKIP_PLATFORMS = frozenset(
+    p.strip().lower() for p in os.getenv("EVENTS_SKIP_PLATFORMS", DEFAULT_SKIP_PLATFORMS).split(",") if p.strip()
 )
-_REFLEXD_BREAKER_COOLDOWN = _env_float(
-    "REFLEXD_BREAKER_COOLDOWN", DEFAULT_BREAKER_COOLDOWN
-)
-_REFLEXD_INJECT_TOOL = _env_str("REFLEXD_INJECT_TOOL", DEFAULT_INJECT_TOOL)
-_REFLEXD_STREAM_TTL = _env_float(
-    "REFLEXD_STREAM_TTL_SECONDS", DEFAULT_STREAM_TTL
-)
-
-_raw_skip = _env_str("REFLEXD_SKIP_PLATFORMS", DEFAULT_SKIP_PLATFORMS)
-_SKIP_PLATFORMS: frozenset[str] = frozenset(
-    p.strip().lower() for p in _raw_skip.split(",") if p.strip()
-)
+_EVENTS_BREAKER_THRESHOLD = int(os.getenv("EVENTS_BREAKER_THRESHOLD", str(DEFAULT_BREAKER_THRESHOLD)))
+_EVENTS_BREAKER_COOLDOWN = float(os.getenv("EVENTS_BREAKER_COOLDOWN", str(DEFAULT_BREAKER_COOLDOWN)))
+_EVENTS_MAX_PENDING = int(os.getenv("EVENTS_MAX_PENDING", str(DEFAULT_MAX_PENDING)))
 
 _SEQ = itertools.count(1)
 _RPC_ID = itertools.count(1)
@@ -141,7 +96,7 @@ def _is_local_platform(platform: str | None) -> bool:
     """Check if platform should be skipped (local development platforms)."""
     if platform is None:
         return False
-    return platform in _SKIP_PLATFORMS
+    return platform in _EVENTS_SKIP_PLATFORMS
 
 
 def _build_payload(
@@ -153,7 +108,7 @@ def _build_payload(
     data: dict[str, Any] | None = None,
     turn_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build the payload for reflexd inject_event."""
+    """Build the payload for event endpoint."""
     payload_data = {
         "text": text or "",
         "platform": platform,
@@ -166,9 +121,13 @@ def _build_payload(
         "data": data if data is not None else {},
     }
     return {
-        "name": event_type,
-        "data": payload_data,
-        "type": "inject",
+        "event_type": event_type,
+        "payload": payload_data,
+        "meta": {
+            "seq": next(_SEQ),
+            "ts": time.time(),
+            "v": 1,
+        },
     }
 
 
@@ -197,14 +156,14 @@ def _extract_chat_user_from_history(
 
 
 class EventDispatcher:
-    """Encapsulates the worker loop and event posting to reflexd."""
+    """Encapsulates the worker loop and event posting to events endpoint."""
 
     def __init__(
         self,
-        mcp_url: str = _REFLEXD_MCP_URL,
-        timeout: float = _REFLEXD_TIMEOUT,
+        endpoint_url: str = os.getenv("EVENTS_ENDPOINT_URL", "http://localhost:8770/events"),
+        timeout: float = float(os.getenv("EVENTS_TIMEOUT_SECONDS", "1.0")),
     ) -> None:
-        self._mcp_url = mcp_url
+        self._endpoint_url = endpoint_url
         self._timeout = timeout
         self._worker_loop: asyncio.AbstractEventLoop | None = None
         self._worker_thread: threading.Thread | None = None
@@ -280,7 +239,7 @@ class EventDispatcher:
                 lambda c=client: asyncio.ensure_future(c.aclose(), loop=loop)
             )
 
-    async def _post_to_reflexd(
+    async def _post_event(
         self,
         event_type: str,
         text: str | None,
@@ -290,24 +249,33 @@ class EventDispatcher:
         data: dict[str, Any] | None = None,
         turn_id: str | None = None,
     ) -> None:
-        """Send a single event to reflexd MCP endpoint."""
-        payload = _build_payload(
-            event_type, text, platform, chat_id, user_id, data, turn_id
-        )
+        """Send a single event to events endpoint."""
+        payload = {
+            "event_type": event_type,
+            "payload": {
+                "text": text or "",
+                "platform": platform,
+                "chat_id": chat_id,
+                "user_id": user_id,
+                "turn_id": turn_id or "",
+                "seq": next(_SEQ),
+                "ts": time.time(),
+                "v": 1,
+                "data": data if data is not None else {},
+            },
+            "meta": {
+                "seq": next(_SEQ),
+                "ts": time.time(),
+                "v": 1,
+            },
+        }
 
         try:
             client = await self._get_client()
             response = await client.post(
-                self._mcp_url,
-                json={
-                    "jsonrpc": "2.0",
-                    "method": "tools/call",
-                    "params": {
-                        "name": _REFLEXD_INJECT_TOOL,
-                        "arguments": payload,
-                    },
-                    "id": next(_RPC_ID),
-                },
+                self._endpoint_url,
+                json=payload,
+                timeout=self._timeout,
             )
             if response.status_code >= 400:
                 logger.warning(
@@ -335,7 +303,7 @@ class EventDispatcher:
     def _record_fail(self) -> None:
         with self._breaker_lock:
             self._breaker_failures += 1
-            if self._breaker_failures >= _REFLEXD_BREAKER_THRESHOLD and not self._breaker_open:
+            if self._breaker_failures >= _EVENTS_BREAKER_THRESHOLD and not self._breaker_open:
                 self._breaker_open = True
                 self._breaker_open_time = time.time()
                 logger.info(
@@ -351,7 +319,7 @@ class EventDispatcher:
             if not self._breaker_open:
                 return True
             # half-open after cooldown
-            if time.time() - self._breaker_open_time >= _REFLEXD_BREAKER_COOLDOWN:
+            if time.time() - self._breaker_open_time >= _EVENTS_BREAKER_COOLDOWN:
                 logger.info("body_expression_bridge: circuit breaker HALF-OPEN, allowing probe")
                 return True
             return False
@@ -364,10 +332,9 @@ class EventDispatcher:
         chat_id: str,
         user_id: str,
         data: dict[str, Any] | None = None,
-        session_id: str | None = None,
         turn_id: str | None = None,
     ) -> None:
-        """Schedule a fire-and-forget POST to reflexd MCP (thread-safe)."""
+        """Schedule a fire-and-forget POST to events endpoint (thread-safe)."""
         norm_platform = (platform or "unknown").strip().lower()
 
         logger.debug(
@@ -377,8 +344,8 @@ class EventDispatcher:
             chat_id,
         )
 
-        if _is_local_platform(norm_platform):
-            logger.debug("body_expression_bridge: skipping local platform: %s", norm_platform)
+        if _is_local_platform(platform):
+            logger.debug("body_expression_bridge: skipping local platform: %s", platform)
             with _metrics_lock:
                 _metrics["dropped_local"] += 1
             return
@@ -399,7 +366,7 @@ class EventDispatcher:
             return
 
         async def _post() -> None:
-            await self._post_to_reflexd(
+            await self._post_event(
                 event_type, text, norm_platform, chat_id, user_id, data, turn_id
             )
 
@@ -410,7 +377,7 @@ class EventDispatcher:
             return
 
         with self._pending_lock:
-            if len(self._pending_futures) >= _REFLEXD_MAX_PENDING:
+            if len(self._pending_futures) >= _EVENTS_MAX_PENDING:
                 oldest = next(iter(self._pending_futures))
                 self._pending_futures.discard(oldest)
                 oldest.cancel()
@@ -422,10 +389,10 @@ class EventDispatcher:
                     ):
                         logger.warning(
                             "body_expression_bridge: pending queue full (%d), dropped oldest",
-                            _REFLEXD_MAX_PENDING
+                            _EVENTS_MAX_PENDING
                         )
                         self._last_pending_warn = now
-            self._pending_futures.add(fut)
+                self._pending_futures.add(fut)
         fut.add_done_callback(self._cleanup_future)
         with _metrics_lock:
             _metrics["scheduled"] += 1
@@ -491,7 +458,7 @@ def _schedule_post(
 ) -> None:
     """Backward-compatible wrapper for existing hook/middleware code."""
     _dispatcher.schedule_post(
-        event_type, text, platform, chat_id, user_id, data, session_id, turn_id
+        event_type, text, platform, chat_id, user_id, data, turn_id
     )
 
 
@@ -731,7 +698,7 @@ async def _flush_stream_buffer(session_id: str) -> None:
         )
 
 
-_stream_ttl_sweep_task: asyncio.Task | None = None
+_stream_ttl_task: asyncio.Task | None = None
 
 
 async def _start_stream_ttl_sweep(loop: asyncio.AbstractEventLoop) -> None:
@@ -774,7 +741,6 @@ async def _on_session_end_hook(
     reason: str,
     task_id: str,
     turn_id: str,
-    api_request_id: str,
     **kwargs,
 ) -> None:
     await _flush_stream_buffer(session_id)
