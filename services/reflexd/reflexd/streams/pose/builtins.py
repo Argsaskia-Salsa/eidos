@@ -76,6 +76,28 @@ def off(num_joints: int = NUM_JOINTS) -> list[Frame]:
     return [[0.0, 0.0, 0.0]]
 
 
+def thinking(num_joints: int = NUM_JOINTS, yaw: float = 30.0, pitch: float = 35.0, hold_frames: int = 60) -> list[Frame]:
+    """Static thinking pose - head tilted up and slightly turned. hold_frames keeps pose active."""
+    return [[yaw, pitch, 0.0]] * hold_frames
+
+
+def thinking_idle(
+    num_joints: int = NUM_JOINTS,
+    base_yaw: float = 30.0,
+    base_pitch: float = 35.0,
+    jitter_yaw: float = 15.0,
+    jitter_pitch: float = 10.0,
+    frames: int = 30
+) -> list[Frame]:
+    """Micro-movements around thinking pose to prevent idle timeout."""
+    patterns = []
+    for _ in range(frames):
+        yaw = base_yaw + random.uniform(-jitter_yaw, jitter_yaw)
+        pitch = base_pitch + random.uniform(-jitter_pitch, jitter_pitch)
+        patterns.append([yaw, pitch, 0.0])
+    return patterns
+
+
 # Pattern specifications for registry
 from ..base.registry import SpecProtocol
 
@@ -96,4 +118,6 @@ BUILTIN_POSES: dict[str, SpecProtocol] = {
     "track": PoseSpec("track", track, {"smooth": 0.3}, "Smooth tracking of moving point"),
     "idle": PoseSpec("idle", idle, {"jitter": 2.0}, "Random micro-movements"),
     "off": PoseSpec("off", off, {}, "All joints at neutral position"),
+    "thinking": PoseSpec("thinking", thinking, {"yaw": 30.0, "pitch": 35.0, "hold_frames": 60}, "Static thinking pose"),
+    "thinking_idle": PoseSpec("thinking_idle", thinking_idle, {"base_yaw": 30.0, "base_pitch": 35.0, "jitter_yaw": 15.0, "jitter_pitch": 10.0, "frames": 30}, "Micro-movements during thinking"),
 }
