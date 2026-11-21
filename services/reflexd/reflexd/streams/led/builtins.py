@@ -12,12 +12,12 @@ NUM_LEDS = CONFIG.NUM_LEDS
 Frame = list[list[int]]  # LEDs x RGB
 
 
-def pattern_cycle(num_leds: int = NUM_LEDS) -> list[Frame]:
-    """Sequential 1→2→...→N→1..."""
+def pattern_cycle(num_leds: int = NUM_LEDS, color: list[int] = [0, 255, 0]) -> list[Frame]:
+    """Sequential 1→2→...→N→1... with configurable color (default green)."""
     patterns = []
     for i in range(num_leds):
         colors = [[0, 0, 0] for _ in range(num_leds)]
-        colors[i] = [255, 255, 255]
+        colors[i] = color[:]
         patterns.append(colors)
     return patterns
 

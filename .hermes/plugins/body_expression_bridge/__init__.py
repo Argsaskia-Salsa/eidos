@@ -151,7 +151,6 @@ def _build_payload(
     chat_id: str,
     user_id: str,
     data: dict[str, Any] | None = None,
-    session_id: str | None = None,
     turn_id: str | None = None,
 ) -> dict[str, Any]:
     """Build the payload for reflexd inject_event."""
@@ -160,7 +159,6 @@ def _build_payload(
         "platform": platform,
         "chat_id": chat_id,
         "user_id": user_id,
-        "session_id": session_id or "",
         "turn_id": turn_id or "",
         "seq": next(_SEQ),
         "ts": time.time(),
@@ -290,12 +288,11 @@ class EventDispatcher:
         chat_id: str,
         user_id: str,
         data: dict[str, Any] | None = None,
-        session_id: str | None = None,
         turn_id: str | None = None,
     ) -> None:
         """Send a single event to reflexd MCP endpoint."""
         payload = _build_payload(
-            event_type, text, platform, chat_id, user_id, data, session_id, turn_id
+            event_type, text, platform, chat_id, user_id, data, turn_id
         )
 
         try:
@@ -403,7 +400,7 @@ class EventDispatcher:
 
         async def _post() -> None:
             await self._post_to_reflexd(
-                event_type, text, norm_platform, chat_id, user_id, data, session_id, turn_id
+                event_type, text, norm_platform, chat_id, user_id, data, turn_id
             )
 
         try:

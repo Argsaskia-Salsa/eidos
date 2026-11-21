@@ -30,12 +30,15 @@ class PoseStreamServer(StreamServer):
         return PoseServerConfig()
 
     def make_frame(self, frame_angles: list[float], smoothing: float) -> dict:
-        """Serialize to WS JSON format expected by stackchan_follow_pose_stream."""
-        return {
-            "ts": time.time(),
-            "kind": "continuous",
-            "angles": [frame_angles],  # Single frame: [yaw, pitch, roll]
-        }
+            """Serialize to WS JSON format expected by stackchan_follow_pose_stream.
+        
+            Gateway expects flat angles array: [yaw, pitch, roll]
+            """
+            return {
+                "ts": time.time(),
+                "kind": "continuous",
+                "angles": frame_angles  # Flat array: [yaw, pitch, roll]
+            }
 
     def generate_frames(self, pose_func: callable, **args: Any) -> list:  # type: ignore[valid-type,override]
         """Call pose function with num_joints and args."""

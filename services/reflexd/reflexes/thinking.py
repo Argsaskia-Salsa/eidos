@@ -10,8 +10,7 @@ Events (from body_expression_bridge via reflexd MCP):
 
 Architecture:
 - Uses LED Stream Server (HTTP API) for LED patterns via stackchan_follow_led_stream
-- Uses Pose Stream Server (HTTP API) for head pose via PoseStreamClient
-- Direct MCP calls for face/LED fallback via reflexd.call()
+- Direct MCP calls for head movement and face via reflexd.call()
 - State machine for clear lifecycle management
 - Reflexes are additional layer over behavior patterns (not base)
 """
@@ -19,12 +18,12 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import random
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 from reflexd import call, on_cleanup, on_event
-from reflexd.streams.pose.client import PoseStreamClient
 
 # =============================================================================
 
@@ -38,10 +37,9 @@ from reflexd.streams.pose.client import PoseStreamClient
 class ThinkingConfig:
     """Thinking reflex configuration. All values in code — easy to find and modify."""
 
-    # --- DEPRECATED (for backward compatibility) ---
     # Head movement
     thinking_yaw: int = 30
-    thinking_pitch: int = 35
+    thinking_pitch: int = 30
     center_yaw: int = 0
     center_pitch: int = 12
     move_speed: int = 80
@@ -49,7 +47,7 @@ class ThinkingConfig:
     # Micro-movements during thinking (prevent idle timeout)
     micro_move_interval: float = 3.0  # seconds between micro-moves
     micro_yaw_range: tuple[int, int] = (-15, 15)
-    micro_pitch_range: tuple[int, int] = (20, 35)
+    micro_pitch_range: tuple[int, int] = (-5, 10)
     micro_speed: int = 30
 
     # Return to neutral after thinking_end
@@ -57,20 +55,21 @@ class ThinkingConfig:
     return_steps: int = 10
     return_delay: float = 3.5
 
-    # --- NEW (pose stream) ---
-    # Pose Stream Server connection
-    pose_server_url: str = "http://127.0.0.1:8775"
-    pose_smoothing: float = 0.5  # 0.0 = fully smoothed, 1.0 = direct
-    pose_fps: int = 20  # frame rate for pose stream
-    thinking_hold_frames: int = 60  # frames to hold thinking pose
-    thinking_idle_jitter_yaw: float = 15.0
-    thinking_idle_jitter_pitch: float = 10.0
-    thinking_idle_frames: int = 30
-    # return_to_neutral_delay: reused from deprecated
-
     # LED pattern via LED Stream Server
     led_pattern: str = "rainbow"  # pattern name in LED Stream Server
     led_fps: int = 20
+    led_brightness: float = 1.0
+    led_cycle_interval: float = 2.0  # seconds per frame for rainbow
+
+    # LED Stream Server connection
+    led_stream_server_url: str = "http://127.0.0.1:8773"
+
+    # Safety
+    max_head_speed: int = 200
+    pitch_min: int = 5
+    pitch_max: int = 85
+    yaw_min: int = -90
+    yaw_max: int = 90
     led_brightness: float = 1.0
     led_cycle_interval: float = 2.0  # seconds per frame for rainbow
 
@@ -180,18 +179,6 @@ class LEDStreamClient:
 
 
 # =============================================================================
-# Pose Stream Client Integration
-# =============================================================================
-
-
-async def _get_pose_client(config: ThinkingConfig):
-    """Create and enter PoseStreamClient context manager."""
-    client = PoseStreamClient(http_url=config.pose_server_url)
-    await client.__aenter__()
-    return client
-
-
-# =============================================================================
 # State Machine Logic
 # =============================================================================
 
@@ -204,8 +191,6 @@ class ThinkingReflex:
         self.state_data = ThinkingStateData()
         self._led_client: LEDStreamClient | None = None
         self._led_client_cm: Any | None = None  # context manager
-        self._pose_client: Any | None = None
-        self._pose_client_cm: Any | None = None
 
     async def _get_led_client(self) -> LEDStreamClient:
         """Get or create LED Stream Client."""
@@ -221,74 +206,27 @@ class ThinkingReflex:
             self._led_client_cm = None
             self._led_client = None
 
-    async def _get_pose_client(self):
-        """Get or create Pose Stream Client."""
-        if self._pose_client is None:
-            self._pose_client = PoseStreamClient(http_url=self.config.pose_server_url)
-            await self._pose_client.__aenter__()
-        return self._pose_client
-
-    async def _cleanup_pose_client(self):
-        if self._pose_client:
-            await self._pose_client.__aexit__(None, None, None)
-            self._pose_client = None
-
-    async def _safe_pose_call(self, method: str, *args, **kwargs):
-        """Safe pose call with fallback to direct MCP call."""
-        cfg = self.config
-        try:
-            client = await self._get_pose_client()
-            func = getattr(client, method)
-            return await func(*args, **kwargs)
-        except Exception:  # noqa: BLE001
-            # Fallback to direct MCP call
-            if method == "set_pose":
-                pose_name = args[0] if args else kwargs.get("name", "off")
-                if pose_name == "thinking":
-                    await self._safe_call(
-                        "move_head",
-                        yaw=cfg.thinking_yaw,
-                        pitch=cfg.thinking_pitch,
-                        speed=cfg.move_speed,
-                    )
-                elif pose_name == "thinking_idle":
-                    await self._safe_call(
-                        "move_head",
-                        yaw=cfg.thinking_yaw,
-                        pitch=cfg.thinking_pitch,
-                        speed=cfg.micro_speed,
-                    )
-                elif pose_name == "off":
-                    await self._safe_call(
-                        "move_head",
-                        yaw=cfg.center_yaw,
-                        pitch=cfg.center_pitch,
-                        speed=cfg.move_speed,
-                    )
-            elif method in ("set_smoothing", "set_fps"):
-                pass  # No direct MCP equivalent
-            # Log warning in production
-
     # ----- State transitions -----
 
     async def _enter_thinking(self):
-        """Enter THINKING state: pose + LED + micro-movements."""
+        """Enter THINKING state: pose + LED + micro-movements.
+        
+        Uses direct MCP for head movement (Pose Stream Server has gateway integration bug).
+        Uses LED Stream Server for LED patterns.
+        """
         cfg = self.config
         sd = self.state_data
 
         # Cancel any existing tasks
         await self._cancel_all_tasks()
 
-        # Head pose via Pose Stream Server
-        await self._safe_pose_call(
-            "set_pose",
-            "thinking",
+        # Head pose via direct MCP (reliable)
+        await self._safe_call(
+            "move_head",
             yaw=cfg.thinking_yaw,
             pitch=cfg.thinking_pitch,
-            hold_frames=cfg.thinking_hold_frames,
+            speed=cfg.move_speed,
         )
-        await self._safe_pose_call("set_smoothing", cfg.pose_smoothing)
-        await self._safe_pose_call("set_fps", cfg.pose_fps)
 
         # Face expression
         await self._safe_call("set_avatar", face="thinking")
@@ -303,7 +241,7 @@ class ThinkingReflex:
             # Fallback to direct MCP if LED Stream Server unavailable
             await self._safe_call("set_all_leds", r=255, g=0, b=0)
 
-        # Start micro-movements task (server handles cycling via thinking_idle pose)
+        # Start micro-movements task
         sd.thinking_task = asyncio.create_task(self._micro_movements_loop())
         sd.state = ThinkingState.THINKING
 
@@ -319,8 +257,13 @@ class ThinkingReflex:
             except asyncio.CancelledError:
                 pass
 
-        # Return to neutral pose via Pose Stream Server
-        await self._safe_pose_call("set_pose", "off")
+        # Return to neutral pose via direct MCP
+        await self._safe_call(
+            "move_head",
+            yaw=self.config.center_yaw,
+            pitch=self.config.center_pitch,
+            speed=self.config.move_speed,
+        )
 
         # Happy pose + green LED
         await self._safe_call("set_all_leds", r=0, g=255, b=0)
@@ -340,7 +283,19 @@ class ThinkingReflex:
     async def _enter_idle(self):
         """Enter IDLE state: neutral pose, LEDs off."""
         await self._cancel_all_tasks()
-        await self._safe_pose_call("set_pose", "off")
+        # Neutral pose via direct MCP
+        await self._safe_call(
+            "move_head",
+            yaw=self.config.center_yaw,
+            pitch=self.config.center_pitch,
+            speed=self.config.move_speed,
+        )
+        # LED: turn off via LED Stream Server
+        try:
+            async with LEDStreamClient(self.config.led_stream_server_url) as client:
+                await client.set_pattern("off")
+        except Exception:  # noqa: BLE001
+            pass
         await self._safe_call("clear_leds")
         await self._safe_call("set_avatar", face="neutral")
         self.state_data.state = ThinkingState.IDLE
@@ -361,24 +316,26 @@ class ThinkingReflex:
 
     async def _micro_movements_loop(self):
         """Background micro-movements during thinking to prevent idle timeout.
-        Sets thinking_idle pose once; server handles cycling with jitter."""
+        
+        Uses direct MCP with small random movements around thinking pose.
+        """
         cfg = self.config
         sd = self.state_data
 
         try:
-            # Set thinking_idle pose - server generates jitter frames and cycles them
-            await self._safe_pose_call(
-                "set_pose",
-                "thinking_idle",
-                base_yaw=cfg.thinking_yaw,
-                base_pitch=cfg.thinking_pitch,
-                jitter_yaw=cfg.thinking_idle_jitter_yaw,
-                jitter_pitch=cfg.thinking_idle_jitter_pitch,
-                frames=cfg.thinking_idle_frames,
-            )
-            # Task stays alive to be cancelled on state exit
             while sd.state == ThinkingState.THINKING:
                 await asyncio.sleep(cfg.micro_move_interval)
+
+                if sd.state != ThinkingState.THINKING:
+                    break
+
+                # Small random movement around thinking pose via direct MCP
+                yaw = cfg.thinking_yaw + random.randint(*cfg.micro_yaw_range)
+                pitch = cfg.thinking_pitch + random.randint(*cfg.micro_pitch_range)
+                yaw = max(cfg.yaw_min, min(cfg.yaw_max, yaw))
+                pitch = max(cfg.pitch_min, min(cfg.pitch_max, pitch))
+
+                await self._safe_call("move_head", yaw=yaw, pitch=pitch, speed=cfg.micro_speed)
 
         except asyncio.CancelledError:
             pass
@@ -444,7 +401,6 @@ class ThinkingReflex:
             except asyncio.CancelledError:
                 pass
         await self._cleanup_led_client()
-        await self._cleanup_pose_client()
 
 
 # =============================================================================
