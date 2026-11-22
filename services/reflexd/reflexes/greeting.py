@@ -115,7 +115,7 @@ class GreetingReflex:
         await asyncio.sleep(cfg.hold_duration)
 
         # Return to neutral
-        await self._safe_call("set_avatar", face="neutral")
+        await self._safe_call("set_avatar", face="idle")
         await self._safe_call(
             "move_head",
             yaw=cfg.center_yaw,
@@ -130,7 +130,7 @@ class GreetingReflex:
     async def on_user_response(self):
         """Return to neutral (already handled by thinking, but safe fallback)."""
         cfg = self.config
-        await self._safe_call("set_avatar", face="neutral")
+        await self._safe_call("set_avatar", face="idle")
         await self._safe_call(
             "move_head",
             yaw=cfg.center_yaw,
@@ -157,7 +157,7 @@ async def on_user_message_greeting(event: dict):
 async def cleanup_user_message_greeting():
     """Cleanup: ensure neutral."""
     cfg = DEFAULT_CONFIG
-    await call("set_avatar", face="neutral")
+    await call("set_avatar", face="idle")
     await call("move_head", yaw=cfg.center_yaw, pitch=cfg.center_pitch, speed=cfg.move_speed)
 
 
@@ -171,5 +171,5 @@ async def on_user_response_greeting(event: dict):
 async def cleanup_user_response_greeting():
     """Cleanup: ensure neutral."""
     cfg = DEFAULT_CONFIG
-    await call("set_avatar", face="neutral")
+    await call("set_avatar", face="idle")
     await call("move_head", yaw=cfg.center_yaw, pitch=cfg.center_pitch, speed=cfg.move_speed)

@@ -297,7 +297,7 @@ class ThinkingReflex:
         except Exception:  # noqa: BLE001
             pass
         await self._safe_call("clear_leds")
-        await self._safe_call("set_avatar", face="neutral")
+        await self._safe_call("set_avatar", face="idle")
         self.state_data.state = ThinkingState.IDLE
 
     async def _cancel_all_tasks(self):
