@@ -39,16 +39,16 @@ class ThinkingConfig:
 
     # Head movement
     thinking_yaw: int = 30
-    thinking_pitch: int = 30
+    thinking_pitch: int = 15
     center_yaw: int = 0
     center_pitch: int = 12
     move_speed: int = 80
 
     # Micro-movements during thinking (prevent idle timeout)
-    micro_move_interval: float = 3.0  # seconds between micro-moves
-    micro_yaw_range: tuple[int, int] = (-15, 15)
-    micro_pitch_range: tuple[int, int] = (-5, 10)
-    micro_speed: int = 30
+    micro_move_interval: float = 1.5  # seconds between micro-moves (was 3.0)
+    micro_yaw_range: tuple[int, int] = (-8, 8)      # was (-15, 15)
+    micro_pitch_range: tuple[int, int] = (-3, 5)    # was (-5, 10)
+    micro_speed: int = 20       # was 30, slower for smoothness
 
     # Return to neutral after thinking_end
     return_to_neutral_delay: float = 60.0  # seconds before neutral

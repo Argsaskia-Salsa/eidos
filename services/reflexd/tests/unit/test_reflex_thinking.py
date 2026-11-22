@@ -64,7 +64,7 @@ async def test_thinking_start_sets_avatar_and_starts_loops():
             assert "move_head" in tools_called
             move_call = next(c for c in calls if c.args[0] == "move_head")
             assert move_call.kwargs["yaw"] == 30
-            assert move_call.kwargs["pitch"] == 30
+            assert move_call.kwargs["pitch"] == 15
             assert move_call.kwargs["speed"] == 80
 
             # Should set LED pattern to "rainbow" via LED Stream Server
@@ -181,5 +181,5 @@ async def test_micro_movements_use_direct_mcp():
         # Check that initial move is to thinking pose
         initial_move = move_calls[0]
         assert initial_move.kwargs["yaw"] == 30
-        assert initial_move.kwargs["pitch"] == 30
+        assert initial_move.kwargs["pitch"] == 15
         assert initial_move.kwargs["speed"] == 80

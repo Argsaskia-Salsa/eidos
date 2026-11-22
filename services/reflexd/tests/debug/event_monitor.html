@@ -412,7 +412,6 @@
 
     <script>
         // Configuration
-        const DEFAULT_HOST = 'localhost:8770';
         const MAX_EVENTS = 500;
         const RECONNECT_BASE_DELAY = 1000;
         const MAX_RECONNECT_DELAY = 30000;
@@ -463,10 +462,10 @@
             }
         }
 
-        // Get WebSocket URL from query param or use default
+        // Get WebSocket URL from query param or auto-detect from current page
         function getWsUrl() {
             const params = new URLSearchParams(window.location.search);
-            const host = params.get('host') || DEFAULT_HOST;
+            const host = params.get('host') || window.location.hostname + ':8770';
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             return `${protocol}//${host}/events/stream`;
         }
@@ -566,8 +565,8 @@
             `;
 
             // Insert at top (newest first)
-            const firstRow = eventsBodyEl.firstChild;
-            if (firstRow && firstRow.classList.contains('empty-state')) {
+            const firstRow = eventsBodyEl.firstElementChild;
+            if (firstRow && firstRow.classList && firstRow.classList.contains('empty-state')) {
                 firstRow.remove();
             }
             eventsBodyEl.insertBefore(row, eventsBodyEl.firstChild);
