@@ -343,6 +343,11 @@ class TestValidEventTypes:
         expected = {
             "user_message", "user_response", "thinking_start", "thinking_end",
             "idle_tick",
+            "touch_tap", "touch_stroke", "touch_hold", "touch_double_tap", "touch_attention",
+            "startle_sound", "startle_motion",
+            "battery_low", "battery_critical", "battery_charging", "battery_full", "battery_update",
+            "screen_on", "screen_off",
+            "attention_idle", "user_interaction", "user_approached", "user_left",
             "platform_event", "stream_start", "stream_delta", "stream_end",
             "session_end", "session_finalize", "api_error",
         }

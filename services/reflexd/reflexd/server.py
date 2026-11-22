@@ -36,6 +36,24 @@ VALID_EVENT_TYPES = {
     "thinking_start",
     "thinking_end",
     "idle_tick",
+    "touch_tap",
+    "touch_stroke",
+    "touch_hold",
+    "touch_double_tap",
+    "touch_attention",
+    "startle_sound",
+    "startle_motion",
+    "battery_low",
+    "battery_critical",
+    "battery_charging",
+    "battery_full",
+    "battery_update",
+    "screen_on",
+    "screen_off",
+    "attention_idle",
+    "user_interaction",
+    "user_approached",
+    "user_left",
     "platform_event",
     "stream_start",
     "stream_delta",
@@ -534,6 +552,16 @@ async def _event_processor() -> None:
                 await handle_inject_event("thinking_end", payload)
             elif event_type == "idle_tick":
                 await handle_inject_event("idle_tick", payload)
+            elif event_type in ("touch_tap", "touch_stroke", "touch_hold", "touch_double_tap", "touch_attention"):
+                await handle_inject_event(event_type, payload)
+            elif event_type in ("startle_sound", "startle_motion"):
+                await handle_inject_event(event_type, payload)
+            elif event_type in ("battery_low", "battery_critical", "battery_charging", "battery_full", "battery_update"):
+                await handle_inject_event(event_type, payload)
+            elif event_type in ("screen_on", "screen_off"):
+                await handle_inject_event(event_type, payload)
+            elif event_type in ("attention_idle", "user_interaction", "user_approached", "user_left"):
+                await handle_inject_event(event_type, payload)
             else:
                 logger.debug("Unhandled event type: %s", event_type)
         except Exception:
