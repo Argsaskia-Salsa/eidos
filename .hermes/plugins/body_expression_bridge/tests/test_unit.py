@@ -1,12 +1,18 @@
 """Tests for body_expression_bridge plugin - covers current functionality before refactoring."""
 
 import asyncio
+import sys
 import time
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import body_expression_bridge as bb
 import httpx
 import pytest
+
+# Add parent directory (plugins) to path so body_expression_bridge can be imported
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+import body_expression_bridge as bb
 
 pytestmark = pytest.mark.order(1)
 

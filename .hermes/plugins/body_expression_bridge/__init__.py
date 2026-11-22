@@ -344,7 +344,7 @@ class EventDispatcher:
             chat_id,
         )
 
-        if _is_local_platform(platform):
+        if _is_local_platform(norm_platform):
             logger.debug("body_expression_bridge: skipping local platform: %s", platform)
             with _metrics_lock:
                 _metrics["dropped_local"] += 1

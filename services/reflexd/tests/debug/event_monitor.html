@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reflexd Event Monitor</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a2e;
+            color: #eaeaea;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: #16213e;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #0f3460;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #eaeaea;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            padding: 0.375rem 0.75rem;
+            border-radius: 9999px;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #64748b;
+        }
+
+        .status.connected .status-indicator {
+            background: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+        }
+
+        .status.connecting .status-indicator {
+            background: #f59e0b;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status.disconnected .status-indicator {
+            background: #ef4444;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: #0f3460;
+            color: #eaeaea;
+            border: 1px solid #1e3a5f;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8125rem;
+            transition: all 0.15s ease;
+        }
+
+        button:hover {
+            background: #1e3a5f;
+            border-color: #2d4a6f;
+        }
+
+        button:active {
+            background: #16213e;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.primary {
+            background: #2563eb;
+            border-color: #1d4ed8;
+        }
+
+        button.primary:hover {
+            background: #1d4ed8;
+        }
+
+        button.danger {
+            background: #dc2626;
+            border-color: #b91c1c;
+        }
+
+        button.danger:hover {
+            background: #b91c1c;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        select {
+            background: #1a1a2e;
+            color: #eaeaea;
+            border: 1px solid #1e3a5f;
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.8125rem;
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 280px;
+            background: #16213e;
+            border-right: 1px solid #0f3460;
+            padding: 1rem;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .sidebar h2 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+            margin-bottom: 1rem;
+        }
+
+        .event-counter {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0.75rem;
+            background: #1a1a2e;
+            border: 1px solid #1e3a5f;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            font-size: 0.8125rem;
+        }
+
+        .event-counter .count {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .event-counter.user_message { border-left: 3px solid #3b82f6; }
+        .event-counter.user_response { border-left: 3px solid #22c55e; }
+        .event-counter.thinking_start { border-left: 3px solid #f59e0b; }
+        .event-counter.thinking_end { border-left: 3px solid #22c55e; }
+        .event-counter.platform_event { border-left: 3px solid #8b5cf6; }
+        .event-counter.stream_start { border-left: 3px solid #06b6d4; }
+        .event-counter.stream_delta { border-left: 3px solid #06b6d4; }
+        .event-counter.stream_end { border-left: 3px solid #06b6d4; }
+        .event-counter.session_end { border-left: 3px solid #64748b; }
+        .event-counter.session_finalize { border-left: 3px solid #64748b; }
+        .event-counter.api_error { border-left: 3px solid #ef4444; }
+
+        .events-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+        }
+
+        th {
+            text-align: left;
+            padding: 0.75rem;
+            background: #16213e;
+            border-bottom: 1px solid #0f3460;
+            color: #94a3b8;
+            font-weight: 500;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #1e3a5f;
+            vertical-align: top;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .time-col {
+            width: 130px;
+            white-space: nowrap;
+            color: #94a3b8;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.75rem;
+        }
+
+        .type-col {
+            width: 140px;
+            white-space: nowrap;
+        }
+
+        .type-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+
+        .type-badge.user_message { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+        .type-badge.user_response { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+        .type-badge.thinking_start { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .type-badge.thinking_end { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+        .type-badge.platform_event { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+        .type-badge.stream_start { background: rgba(6, 182, 212, 0.2); color: #06b6d4; }
+        .type-badge.stream_delta { background: rgba(6, 182, 212, 0.2); color: #06b6d4; }
+        .type-badge.stream_end { background: rgba(6, 182, 212, 0.2); color: #06b6d4; }
+        .type-badge.session_end { background: rgba(100, 116, 139, 0.2); color: #64748b; }
+        .type-badge.session_finalize { background: rgba(100, 116, 139, 0.2); color: #64748b; }
+        .type-badge.api_error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .type-badge.connected { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+
+        .payload-col {
+            max-width: 400px;
+        }
+
+        .payload-toggle {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            padding: 0;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .payload-toggle:hover {
+            color: #eaeaea;
+        }
+
+        .payload-content {
+            display: none;
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background: #16213e;
+            border: 1px solid #1e3a5f;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.6875rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .payload-content.visible {
+            display: block;
+        }
+
+        .meta-col {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.6875rem;
+            color: #64748b;
+            white-space: nowrap;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #64748b;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+
+            .events-container {
+                padding: 0.5rem;
+            }
+
+            table {
+                font-size: 0.75rem;
+            }
+
+            th, td {
+                padding: 0.5rem;
+            }
+        }
+
+        .reconnect-info {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-left: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Reflexd Event Monitor</h1>
+        <div class="status disconnected" id="status">
+            <span class="status-indicator"></span>
+            <span id="status-text">Disconnected</span>
+            <span class="reconnect-info" id="reconnect-info"></span>
+        </div>
+        <div class="controls">
+            <div class="filter-group">
+                <label for="filter-select" style="font-size: 0.75rem; color: #94a3b8;">Filter:</label>
+                <select id="filter-select">
+                    <option value="">All Events</option>
+                    <option value="user_message">user_message</option>
+                    <option value="user_response">user_response</option>
+                    <option value="thinking_start">thinking_start</option>
+                    <option value="thinking_end">thinking_end</option>
+                    <option value="platform_event">platform_event</option>
+                    <option value="stream_start">stream_start</option>
+                    <option value="stream_delta">stream_delta</option>
+                    <option value="stream_end">stream_end</option>
+                    <option value="session_end">session_end</option>
+                    <option value="session_finalize">session_finalize</option>
+                    <option value="api_error">api_error</option>
+                </select>
+            </div>
+            <button id="pause-btn" onclick="togglePause()">Pause</button>
+            <button id="clear-btn" class="danger" onclick="clearEvents()">Clear</button>
+        </div>
+    </header>
+
+    <main>
+        <aside class="sidebar">
+            <h2>Event Counts</h2>
+            <div id="counters"></div>
+        </aside>
+
+        <section class="events-container">
+            <table id="events-table">
+                <thead>
+                    <tr>
+                        <th class="time-col">Time</th>
+                        <th class="type-col">Type</th>
+                        <th class="payload-col">Payload</th>
+                        <th class="meta-col">Meta</th>
+                    </tr>
+                </thead>
+                <tbody id="events-body">
+                    <tr class="empty-state">
+                        <td colspan="4">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                            <p>Waiting for events...</p>
+                            <p style="font-size: 0.75rem; margin-top: 0.5rem;">Connect to WebSocket to start monitoring</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        // Configuration
+        const DEFAULT_HOST = 'localhost:8770';
+        const MAX_EVENTS = 500;
+        const RECONNECT_BASE_DELAY = 1000;
+        const MAX_RECONNECT_DELAY = 30000;
+
+        // State
+        let ws = null;
+        let reconnectAttempt = 0;
+        let isPaused = false;
+        let eventCounts = {};
+        let eventRows = [];
+        let filterType = '';
+        let shouldReconnect = true;
+
+        // DOM elements
+        const statusEl = document.getElementById('status');
+        const statusTextEl = document.getElementById('status-text');
+        const reconnectInfoEl = document.getElementById('reconnect-info');
+        const eventsBodyEl = document.getElementById('events-body');
+        const countersEl = document.getElementById('counters');
+        const filterSelectEl = document.getElementById('filter-select');
+        const pauseBtnEl = document.getElementById('pause-btn');
+        const clearBtnEl = document.getElementById('clear-btn');
+
+        // Initialize from localStorage
+        function loadState() {
+            try {
+                const savedFilter = localStorage.getItem('eventMonitor_filter');
+                const savedPause = localStorage.getItem('eventMonitor_paused');
+                if (savedFilter) {
+                    filterType = savedFilter;
+                    filterSelectEl.value = filterType;
+                }
+                if (savedPause === 'true') {
+                    isPaused = true;
+                    pauseBtnEl.textContent = 'Resume';
+                }
+            } catch (e) {
+                // localStorage not available
+            }
+        }
+
+        function saveState() {
+            try {
+                localStorage.setItem('eventMonitor_filter', filterType);
+                localStorage.setItem('eventMonitor_paused', isPaused);
+            } catch (e) {
+                // localStorage not available
+            }
+        }
+
+        // Get WebSocket URL from query param or use default
+        function getWsUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const host = params.get('host') || DEFAULT_HOST;
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${protocol}//${host}/events/stream`;
+        }
+
+        // Update connection status UI
+        function setStatus(state, message) {
+            statusEl.className = 'status ' + state;
+            statusTextEl.textContent = message;
+        }
+
+        function setReconnectInfo(text) {
+            reconnectInfoEl.textContent = text;
+        }
+
+        // Create event counter element
+        function createCounterElement(eventType, count) {
+            const div = document.createElement('div');
+            div.className = `event-counter ${eventType}`;
+            div.dataset.type = eventType;
+            div.innerHTML = `
+                <span class="event-type-label">
+                    <span class="type-badge ${eventType}">${eventType}</span>
+                </span>
+                <span class="count">${count}</span>
+            `;
+            return div;
+        }
+
+        // Update sidebar counters
+        function updateCounters() {
+            countersEl.innerHTML = '';
+            const sortedTypes = Object.keys(eventCounts).sort();
+            for (const type of sortedTypes) {
+                countersEl.appendChild(createCounterElement(type, eventCounts[type]));
+            }
+            if (sortedTypes.length === 0) {
+                countersEl.innerHTML = '<p style="color: #64748b; font-size: 0.8125rem;">No events yet</p>';
+            }
+        }
+
+        // Format timestamp
+        function formatTime(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleTimeString(undefined, {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                fractionalSecondDigits: 3
+            });
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Format JSON for display
+        function formatJson(obj) {
+            return escapeHtml(JSON.stringify(obj, null, 2));
+        }
+
+        // Add event to table
+        function addEvent(event) {
+            const eventType = event.event_type || 'unknown';
+            const payload = event.payload || {};
+            const meta = event.meta || {};
+
+            // Update counts
+            eventCounts[eventType] = (eventCounts[eventType] || 0) + 1;
+            updateCounters();
+
+            // Apply filter
+            if (filterType && filterType !== eventType) {
+                return;
+            }
+
+            // Create row
+            const row = document.createElement('tr');
+            row.dataset.type = eventType;
+
+            const timeStr = formatTime(meta.ts || Date.now() / 1000);
+            const payloadStr = formatJson(payload);
+            const metaStr = formatJson(meta);
+
+            row.innerHTML = `
+                <td class="time-col">${timeStr}</td>
+                <td class="type-col"><span class="type-badge ${eventType}">${eventType}</span></td>
+                <td class="payload-col">
+                    <button class="payload-toggle" onclick="togglePayload(this)">
+                        <span>▶</span> View Payload
+                    </button>
+                    <div class="payload-content">${payloadStr}</div>
+                </td>
+                <td class="meta-col">${metaStr}</td>
+            `;
+
+            // Insert at top (newest first)
+            const firstRow = eventsBodyEl.firstChild;
+            if (firstRow && firstRow.classList.contains('empty-state')) {
+                firstRow.remove();
+            }
+            eventsBodyEl.insertBefore(row, eventsBodyEl.firstChild);
+
+            // Limit rows
+            while (eventsBodyEl.children.length > MAX_EVENTS) {
+                eventsBodyEl.lastChild.remove();
+            }
+        }
+
+        // Toggle payload visibility
+        window.togglePayload = function(btn) {
+            const content = btn.nextElementSibling;
+            const icon = btn.querySelector('span');
+            if (content.classList.contains('visible')) {
+                content.classList.remove('visible');
+                icon.textContent = '▶';
+            } else {
+                content.classList.add('visible');
+                icon.textContent = '▼';
+            }
+        };
+
+        // Toggle pause
+        window.togglePause = function() {
+            isPaused = !isPaused;
+            pauseBtnEl.textContent = isPaused ? 'Resume' : 'Pause';
+            pauseBtnEl.classList.toggle('primary', !isPaused);
+            saveState();
+        };
+
+        // Clear events
+        window.clearEvents = function() {
+            eventsBodyEl.innerHTML = `
+                <tr class="empty-state">
+                    <td colspan="4">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        <p>Waiting for events...</p>
+                        <p style="font-size: 0.75rem; margin-top: 0.5rem;">Connect to WebSocket to start monitoring</p>
+                    </td>
+                </tr>
+            `;
+            eventCounts = {};
+            updateCounters();
+        };
+
+        // Filter events
+        filterSelectEl.addEventListener('change', (e) => {
+            filterType = e.target.value;
+            saveState();
+            // Re-render all events with new filter
+            renderFilteredEvents();
+        });
+
+        function renderFilteredEvents() {
+            const rows = eventsBodyEl.querySelectorAll('tr:not(.empty-state)');
+            rows.forEach(row => {
+                const type = row.dataset.type;
+                if (!filterType || filterType === type) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+
+        // Connect to WebSocket
+        function connect() {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                return;
+            }
+
+            const url = getWsUrl();
+            setStatus('connecting', 'Connecting...');
+            setReconnectInfo('');
+
+            ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                setStatus('connected', 'Connected');
+                setReconnectInfo('');
+                reconnectAttempt = 0;
+            };
+
+            ws.onmessage = (event) => {
+                if (isPaused) return;
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                } catch (e) {
+                    console.error('Failed to parse message:', e);
+                }
+            };
+
+            ws.onclose = (event) => {
+                if (!shouldReconnect) {
+                    setStatus('disconnected', 'Disconnected');
+                    return;
+                }
+
+                setStatus('disconnected', 'Disconnected');
+                const delay = Math.min(
+                    RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempt) + Math.random() * 1000,
+                    MAX_RECONNECT_DELAY
+                );
+                reconnectAttempt++;
+                setReconnectInfo(`Reconnecting in ${Math.round(delay / 1000)}s (attempt ${reconnectAttempt})...`);
+                setTimeout(connect, delay);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // Handle incoming messages
+        function handleMessage(data) {
+            if (data.type === 'connected') {
+                console.log('Connected to event stream, available types:', data.event_types);
+            } else if (data.type === 'event') {
+                addEvent(data);
+            }
+        }
+
+        // Initialize
+        loadState();
+        connect();
+
+        // Handle page unload
+        window.addEventListener('beforeunload', () => {
+            shouldReconnect = false;
+            if (ws) {
+                ws.close();
+            }
+        });
+    </script>
+</body>
+</html>

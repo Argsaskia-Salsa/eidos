@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -42,6 +43,10 @@ VALID_EVENT_TYPES = {
     "session_finalize",
     "api_error",
 }
+
+# WebSocket clients for real-time event streaming
+_event_ws_clients: set[web.WebSocketResponse] = set()
+_EVENT_WS_MAX_CLIENTS = int(os.getenv("EVENTS_WS_MAX_CLIENTS", "10"))
 
 # Event queue for processing - will be initialized lazily per event loop
 _event_queues: dict[int, asyncio.Queue] = {}
@@ -500,7 +505,7 @@ async def handle_events(request: web.Request) -> web.Response:
             "payload": payload,
             "meta": meta,
         }), timeout=1.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return web.json_response(
             {"ok": False, "error": "Event queue full"},
             status=503,
@@ -514,7 +519,7 @@ async def _event_processor() -> None:
     while True:
         try:
             event = await asyncio.wait_for(_get_event_queue().get(), timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
 
         event_type = event["event_type"]
@@ -536,8 +541,42 @@ async def _event_processor() -> None:
                 await handle_inject_event("thinking_end", payload)
             else:
                 logger.debug("Unhandled event type: %s", event_type)
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Error processing event %s: %s", event_type, e)
+        except Exception:
+            logger.exception("Error processing event %s", event_type)
+
+        # Broadcast to WebSocket clients after successful processing
+        ws_message = {
+            "type": "event",
+            "event_type": event_type,
+            "payload": payload,
+            "meta": meta,
+        }
+        for ws in list(_event_ws_clients):
+            try:
+                await ws.send_json(ws_message)
+            except Exception:
+                _event_ws_clients.discard(ws)
+
+
+async def handle_events_stream(request: web.Request) -> web.WebSocketResponse:
+    """WebSocket endpoint for real-time event streaming (GET /events/stream)."""
+    if len(_event_ws_clients) >= _EVENT_WS_MAX_CLIENTS:
+        return web.Response(status=503, text="Max WebSocket clients reached")
+
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    _event_ws_clients.add(ws)
+
+    try:
+        await ws.send_json({"type": "connected", "event_types": list(VALID_EVENT_TYPES)})
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.CLOSE:
+                break
+            # Ignore incoming messages from client (keep-alive only)
+    finally:
+        _event_ws_clients.discard(ws)
+
+    return ws
 
 
 async def _start_event_processor() -> None:
@@ -569,6 +608,11 @@ def create_app() -> web.Application:
     app = web.Application()
     app.router.add_post("/mcp", handle_jsonrpc)
     app.router.add_post("/events", handle_events)
+    app.router.add_get("/events/stream", handle_events_stream)
     app.router.add_get("/health", health_check)
+    # Serve debug UI
+    import os
+    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tests", "debug")
+    app.router.add_static("/tests/debug/", path=debug_path, name="debug")
     app.on_startup.append(lambda app: _start_event_processor())
     return app
