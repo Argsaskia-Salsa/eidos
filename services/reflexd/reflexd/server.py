@@ -35,6 +35,7 @@ VALID_EVENT_TYPES = {
     "user_response",
     "thinking_start",
     "thinking_end",
+    "idle_tick",
     "platform_event",
     "stream_start",
     "stream_delta",
@@ -531,14 +532,8 @@ async def _event_processor() -> None:
                 await handle_inject_event("thinking_start", payload)
             elif event_type in ("user_response", "thinking_end"):
                 await handle_inject_event("thinking_end", payload)
-            elif event_type == "user_message":
-                await handle_inject_event("user_message", payload)
-            elif event_type == "user_response":
-                await handle_inject_event("user_response", payload)
-            elif event_type == "thinking_start":
-                await handle_inject_event("thinking_start", payload)
-            elif event_type == "thinking_end":
-                await handle_inject_event("thinking_end", payload)
+            elif event_type == "idle_tick":
+                await handle_inject_event("idle_tick", payload)
             else:
                 logger.debug("Unhandled event type: %s", event_type)
         except Exception:

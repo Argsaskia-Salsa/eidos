@@ -342,6 +342,7 @@ class TestValidEventTypes:
         """VALID_EVENT_TYPES contains all expected event types."""
         expected = {
             "user_message", "user_response", "thinking_start", "thinking_end",
+            "idle_tick",
             "platform_event", "stream_start", "stream_delta", "stream_end",
             "session_end", "session_finalize", "api_error",
         }
