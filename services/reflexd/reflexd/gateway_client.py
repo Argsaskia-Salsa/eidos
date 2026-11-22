@@ -7,7 +7,7 @@ import uuid
 
 import aiohttp
 
-from .circuit_breaker import get_circuit_breaker
+from .circuit_breaker import CircuitBreaker, create_circuit_breaker
 from .safety import clamp_move_head
 
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=5)
@@ -66,7 +66,16 @@ class GatewayClient:
         self.timeout = timeout or _get_timeout()
         self.session: aiohttp.ClientSession | None = None
         self.session_id: str | None = None
-        self._circuit_breaker = get_circuit_breaker()
+
+        self.circuit_breakers: dict[str, CircuitBreaker] = {
+            "move_head": create_circuit_breaker(),
+            "set_avatar": create_circuit_breaker(),
+            "set_all_leds": create_circuit_breaker(),
+            "clear_leds": create_circuit_breaker(),
+        }
+
+    def _get_breaker(self, tool: str) -> CircuitBreaker:
+        return self.circuit_breakers.get(tool, self.circuit_breakers["move_head"])
 
     async def connect(self) -> None:
         self.session = aiohttp.ClientSession(timeout=self.timeout)
@@ -158,6 +167,8 @@ class GatewayClient:
         if tool in ("move_head", "set_all_leds"):
             await _rate_limiter.acquire()
 
+        breaker = self._get_breaker(tool)
+
         async def _do_call() -> dict:
             request = {
                 "jsonrpc": "2.0",
@@ -182,7 +193,7 @@ class GatewayClient:
                     raise RuntimeError(f"Tool error: {data['error']}")
                 return data.get("result", {})
 
-        return await self._circuit_breaker.call(_do_call)
+        return await breaker.call(_do_call)
 
     async def close(self) -> None:
         if self.session:

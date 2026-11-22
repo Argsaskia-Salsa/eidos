@@ -28,7 +28,6 @@ class MockAsyncContextManager:
 def make_post_mock(mock_resp):
     """Create a mock for session.post that returns an async context manager."""
     mock_cm = MockAsyncContextManager(mock_resp)
-    # Use a regular Mock, not AsyncMock, so it returns the context manager directly
     mock_post = Mock(return_value=mock_cm)
     return mock_post
 
@@ -242,7 +241,6 @@ class TestGatewayClient:
         gateway_client.session = AsyncMock()
         gateway_client.session_id = "test-session-id"
 
-        # Create a mock that raises TimeoutError when __aenter__ is called
         mock_cm = Mock()
         mock_cm.__aenter__ = Mock(side_effect=TimeoutError())
         mock_cm.__aexit__ = Mock(return_value=None)
@@ -289,6 +287,189 @@ class TestGatewayClient:
 
         with pytest.raises(RuntimeError, match="Not connected to gateway"):
             await gateway_client.call("set_avatar", {"face": "happy"})
+
+
+class TestPerToolCircuitBreakers:
+    @pytest.mark.asyncio
+    async def test_move_head_failures_do_not_block_set_avatar(self, gateway_client):
+        from unittest.mock import Mock
+        from reflexd.circuit_breaker import CircuitBreaker
+
+        # Replace breakers with explicit config to avoid module-level pollution
+        gateway_client.circuit_breakers = {
+            "move_head": CircuitBreaker(failure_threshold=5, retry_delays=[0.01, 0.01, 0.01]),
+            "set_avatar": CircuitBreaker(failure_threshold=5, retry_delays=[0.01, 0.01, 0.01]),
+            "set_all_leds": CircuitBreaker(failure_threshold=5, retry_delays=[0.01, 0.01, 0.01]),
+            "clear_leds": CircuitBreaker(failure_threshold=5, retry_delays=[0.01, 0.01, 0.01]),
+        }
+
+        gateway_client.session = Mock()
+        gateway_client.session_id = "test-session-id"
+
+        call_count = {"move_head": 0, "set_avatar": 0}
+
+        def make_post(*_args, **kwargs):
+            tool = kwargs.get("json", {}).get("params", {}).get("name", "unknown")
+            call_count[tool] += 1
+
+            if tool == "move_head":
+                raise RuntimeError("Tool call failed: 500 - Internal Server Error")
+            else:
+                mock_resp = AsyncMock()
+                mock_resp.status = 200
+                mock_resp.json.return_value = {"result": {"success": True}}
+                return MockAsyncContextManager(mock_resp)
+
+        gateway_client.session.post.side_effect = make_post
+
+        for _ in range(6):
+            with pytest.raises(RuntimeError):
+                await gateway_client.call("move_head", {"yaw": 0, "pitch": 60})
+
+        assert call_count["move_head"] >= 5
+
+        result = await gateway_client.call("set_avatar", {"face": "happy"})
+        assert result == {"success": True}
+        assert call_count["set_avatar"] == 1
+
+    @pytest.mark.asyncio
+    async def test_separate_circuit_breakers_per_tool(self, gateway_client):
+        from unittest.mock import Mock
+        from reflexd.circuit_breaker import CircuitBreaker
+
+        # Replace breakers with explicit config to avoid module-level pollution
+        gateway_client.circuit_breakers = {
+            "move_head": CircuitBreaker(failure_threshold=5, retry_delays=[0.01, 0.01, 0.01]),
+            "set_avatar": CircuitBreaker(failure_threshold=5, retry_delays=[0.01, 0.01, 0.01]),
+            "set_all_leds": CircuitBreaker(failure_threshold=5, retry_delays=[0.01, 0.01, 0.01]),
+            "clear_leds": CircuitBreaker(failure_threshold=5, retry_delays=[0.01, 0.01, 0.01]),
+        }
+
+        gateway_client.session = Mock()
+        gateway_client.session_id = "test-session-id"
+
+        # Always fail for move_head and set_all_leds
+        def make_post_fail(*_args, **kwargs):
+            raise RuntimeError("Tool call failed: 500 - Internal Server Error")
+
+        gateway_client.session.post.side_effect = make_post_fail
+
+        # 5 calls to move_head should all fail and open its circuit
+        for _ in range(5):
+            with pytest.raises(RuntimeError):
+                await gateway_client.call("move_head", {"yaw": 0, "pitch": 60})
+
+        assert gateway_client.circuit_breakers["move_head"].state.name == "OPEN"
+
+        # set_all_leds should have its own circuit, not affected by move_head
+        # It should fail 5 times and open its own circuit
+        for _ in range(5):
+            with pytest.raises(RuntimeError):
+                await gateway_client.call("set_all_leds", {"r": 255, "g": 0, "b": 0})
+
+        assert gateway_client.circuit_breakers["set_all_leds"].state.name == "OPEN"
+
+        # set_avatar should still work (its circuit is CLOSED)
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.json.return_value = {"result": {"success": True}}
+        gateway_client.session.post.side_effect = None
+        gateway_client.session.post.return_value = MockAsyncContextManager(mock_resp)
+
+        result = await gateway_client.call("set_avatar", {"face": "happy"})
+        assert result == {"success": True}
+        assert gateway_client.circuit_breakers["set_avatar"].state.name == "CLOSED"
+
+
+class TestHalfOpenProbing:
+    @pytest.mark.asyncio
+    async def test_half_open_probe_after_delay(self):
+        from unittest.mock import Mock
+        from reflexd.circuit_breaker import CircuitBreaker
+
+        client = GatewayClient("http://test-gateway:8767/mcp", "test-token")
+        client.session = Mock()
+        client.session_id = "test-session-id"
+
+        # Replace move_head breaker with one that has 0.05s half-open delay and fast retries
+        client.circuit_breakers["move_head"] = CircuitBreaker(
+            failure_threshold=5,
+            retry_delays=[0.01, 0.01, 0.01],
+            half_open_delay=0.05
+        )
+
+        # Always fail initially
+        def make_post_fail(*_args, **kwargs):
+            raise RuntimeError("Tool call failed: 500 - Internal Server Error")
+
+        client.session.post.side_effect = make_post_fail
+
+        # 5 failures should open the circuit
+        for _ in range(5):
+            with pytest.raises(RuntimeError):
+                await client.call("move_head", {"yaw": 0, "pitch": 60})
+
+        assert client.circuit_breakers["move_head"].state.name == "OPEN"
+
+        # Wait for half-open delay (0.05s) plus buffer
+        await asyncio.sleep(0.1)
+
+        # Now make the call succeed for the half-open probe
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.json.return_value = {"result": {"success": True}}
+        client.session.post.side_effect = None
+        client.session.post.return_value = MockAsyncContextManager(mock_resp)
+
+        result = await client.call("move_head", {"yaw": 0, "pitch": 60})
+        assert result == {"success": True}
+        assert client.circuit_breakers["move_head"].state.name == "CLOSED"
+
+
+class TestRateLimiter:
+    @pytest.mark.asyncio
+    async def test_rate_limiter_enforces_min_interval(self):
+        from reflexd.gateway_client import RateLimiter
+
+        limiter = RateLimiter(2.0)
+
+        start = time.monotonic()
+        await limiter.acquire()
+        await limiter.acquire()
+        await limiter.acquire()
+        elapsed = time.monotonic() - start
+
+        assert elapsed >= 0.9
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_first_call_no_delay(self):
+        from reflexd.gateway_client import RateLimiter
+
+        limiter = RateLimiter(10.0)
+
+        start = time.monotonic()
+        await limiter.acquire()
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.05
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_thread_safe(self):
+        from reflexd.gateway_client import RateLimiter
+
+        limiter = RateLimiter(100.0)
+
+        async def acquire_n(n):
+            for _ in range(n):
+                await limiter.acquire()
+
+        start = time.monotonic()
+        await asyncio.gather(acquire_n(10), acquire_n(10), acquire_n(10))
+        elapsed = time.monotonic() - start
+
+        min_interval = 1.0 / 100.0
+        expected_min = 29 * min_interval
+        assert elapsed >= expected_min * 0.9
 
 
 class TestGetTimeout:
@@ -428,49 +609,3 @@ class TestGatewayClientModule:
             import reflexd.gateway_client as gc
 
             gc._gateway_client = original
-
-
-class TestRateLimiter:
-    @pytest.mark.asyncio
-    async def test_rate_limiter_enforces_min_interval(self):
-        from reflexd.gateway_client import RateLimiter
-
-        limiter = RateLimiter(2.0)
-
-        start = time.monotonic()
-        await limiter.acquire()
-        await limiter.acquire()
-        await limiter.acquire()
-        elapsed = time.monotonic() - start
-
-        assert elapsed >= 0.9
-
-    @pytest.mark.asyncio
-    async def test_rate_limiter_first_call_no_delay(self):
-        from reflexd.gateway_client import RateLimiter
-
-        limiter = RateLimiter(10.0)
-
-        start = time.monotonic()
-        await limiter.acquire()
-        elapsed = time.monotonic() - start
-
-        assert elapsed < 0.05
-
-    @pytest.mark.asyncio
-    async def test_rate_limiter_thread_safe(self):
-        from reflexd.gateway_client import RateLimiter
-
-        limiter = RateLimiter(100.0)
-
-        async def acquire_n(n):
-            for _ in range(n):
-                await limiter.acquire()
-
-        start = time.monotonic()
-        await asyncio.gather(acquire_n(10), acquire_n(10), acquire_n(10))
-        elapsed = time.monotonic() - start
-
-        min_interval = 1.0 / 100.0
-        expected_min = 29 * min_interval
-        assert elapsed >= expected_min * 0.9
