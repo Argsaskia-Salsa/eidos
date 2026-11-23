@@ -72,28 +72,28 @@ Hermes Agent (turn)
 
 ### Components
 
-| File | Role |
-|------|------|
-| `__init__.py` | Main provider class `HindsightMemoryProvider` + `register()` entry point |
-| `settings.py` | Configuration schema, validation, defaults |
-| `config_schema.py` | Dashboard-compatible config schema (Hermes core imports this) |
-| `embedded.py` | Local embedded daemon lifecycle (start/stop/health/materialize env) |
-| `templates.py` | Starter memory templates for `hermes memory setup` |
-| `setup.py` | Interactive wizard for `hermes memory setup` |
+| File               | Role                                                                     |
+|--------------------|--------------------------------------------------------------------------|
+| `__init__.py`      | Main provider class `HindsightMemoryProvider` + `register()` entry point |
+| `settings.py`      | Configuration schema, validation, defaults                               |
+| `config_schema.py` | Dashboard-compatible config schema (Hermes core imports this)            |
+| `embedded.py`      | Local embedded daemon lifecycle (start/stop/health/materialize env)      |
+| `templates.py`     | Starter memory templates for `hermes memory setup`                       |
+| `setup.py`         | Interactive wizard for `hermes memory setup`                             |
 
 ## Hooks & Tools
 
 The plugin registers one hook and three tools:
 
-| Hook | Trigger | Description |
-|------|---------|-------------|
+| Hook               | Trigger          | Description                                   |
+|--------------------|------------------|-----------------------------------------------|
 | `on_session_start` | Session boundary | Initializes provider, starts auto-recall task |
 
-| Tool | Mode | Description |
-|------|------|-------------|
-| `hindsight_retain` | `hybrid`, `tools` | Store information with auto entity extraction; optional `tags` |
-| `hindsight_recall` | `hybrid`, `tools` | Multi-strategy search (semantic + entity graph) |
-| `hindsight_reflect` | `hybrid`, `tools` | Cross-memory synthesis (LLM-powered) |
+| Tool                | Mode              | Description                                                    |
+|---------------------|-------------------|----------------------------------------------------------------|
+| `hindsight_retain`  | `hybrid`, `tools` | Store information with auto entity extraction; optional `tags` |
+| `hindsight_recall`  | `hybrid`, `tools` | Multi-strategy search (semantic + entity graph)                |
+| `hindsight_reflect` | `hybrid`, `tools` | Cross-memory synthesis (LLM-powered)                           |
 
 ### Tool Payloads
 
@@ -138,58 +138,58 @@ Config file: `~/.hermes/hindsight/config.json` (written by `hermes memory setup`
 
 ### Connection
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `mode` | `cloud` | `cloud`, `local_embedded`, or `local_external` |
-| `api_url` | `https://api.hindsight.vectorize.io` | API URL (cloud and local_external modes) |
+| Key       | Default                              | Description                                    |
+|-----------|--------------------------------------|------------------------------------------------|
+| `mode`    | `cloud`                              | `cloud`, `local_embedded`, or `local_external` |
+| `api_url` | `https://api.hindsight.vectorize.io` | API URL (cloud and local_external modes)       |
 
 ### Memory Bank
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `bank_id` | `hermes` | Memory bank name (static fallback) |
-| `bank_id_template` | — | Dynamic template with placeholders: `{profile}`, `{workspace}`, `{platform}`, `{user}`, `{session}` |
-| `bank_mission` | — | Reflect mission for synthesis framing |
-| `bank_retain_mission` | — | Retain mission for extraction steering |
+| Key                   | Default  | Description                                                                                         |
+|-----------------------|----------|-----------------------------------------------------------------------------------------------------|
+| `bank_id`             | `hermes` | Memory bank name (static fallback)                                                                  |
+| `bank_id_template`    | —        | Dynamic template with placeholders: `{profile}`, `{workspace}`, `{platform}`, `{user}`, `{session}` |
+| `bank_mission`        | —        | Reflect mission for synthesis framing                                                               |
+| `bank_retain_mission` | —        | Retain mission for extraction steering                                                              |
 
 ### Recall
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `recall_budget` | `mid` | `low` / `mid` / `high` |
-| `recall_prefetch_method` | `recall` | `recall` (raw facts) or `reflect` (LLM synthesis) |
-| `recall_max_tokens` | `4096` | Max tokens for recall results |
-| `recall_max_input_chars` | `800` | Max input query length |
-| `recall_types` | `observation` | Fact types: `observation,world,experience` |
-| `auto_recall` | `true` | Auto-recall before each turn |
-| `recall_sync` | `false` | Sync recall against current message |
+| Key                      | Default       | Description                                       |
+|--------------------------|---------------|---------------------------------------------------|
+| `recall_budget`          | `mid`         | `low` / `mid` / `high`                            |
+| `recall_prefetch_method` | `recall`      | `recall` (raw facts) or `reflect` (LLM synthesis) |
+| `recall_max_tokens`      | `4096`        | Max tokens for recall results                     |
+| `recall_max_input_chars` | `800`         | Max input query length                            |
+| `recall_types`           | `observation` | Fact types: `observation,world,experience`        |
+| `auto_recall`            | `true`        | Auto-recall before each turn                      |
+| `recall_sync`            | `false`       | Sync recall against current message               |
 
 ### Retain
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `auto_retain` | `true` | Automatically retain conversation turns |
-| `retain_every_n_turns` | `1` | Retain every N turns |
-| `retain_context` | `conversation between Hermes Agent and the User` | Context label |
-| `retain_tags` | — | Default tags for retained memories |
+| Key                    | Default                                          | Description                             |
+|------------------------|--------------------------------------------------|-----------------------------------------|
+| `auto_retain`          | `true`                                           | Automatically retain conversation turns |
+| `retain_every_n_turns` | `1`                                              | Retain every N turns                    |
+| `retain_context`       | `conversation between Hermes Agent and the User` | Context label                           |
+| `retain_tags`          | —                                                | Default tags for retained memories      |
 
 ### Integration
 
-| Key | Default | Description |
-|-----|---------|-------------|
+| Key           | Default  | Description                                                          |
+|---------------|----------|----------------------------------------------------------------------|
 | `memory_mode` | `hybrid` | `hybrid` (auto + tools), `context` (auto only), `tools` (tools only) |
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `HINDSIGHT_API_KEY` | API key for Hindsight Cloud |
-| `HINDSIGHT_LLM_API_KEY` | LLM API key for local mode |
+| Variable                     | Description                 |
+|------------------------------|-----------------------------|
+| `HINDSIGHT_API_KEY`          | API key for Hindsight Cloud |
+| `HINDSIGHT_LLM_API_KEY`      | LLM API key for local mode  |
 | `HINDSIGHT_API_LLM_BASE_URL` | LLM Base URL for local mode |
-| `HINDSIGHT_API_URL` | Override API endpoint |
-| `HINDSIGHT_BANK_ID` | Override bank name |
-| `HINDSIGHT_BUDGET` | Override recall budget |
-| `HINDSIGHT_MODE` | Override mode |
+| `HINDSIGHT_API_URL`          | Override API endpoint       |
+| `HINDSIGHT_BANK_ID`          | Override bank name          |
+| `HINDSIGHT_BUDGET`           | Override recall budget      |
+| `HINDSIGHT_MODE`             | Override mode               |
 
 ## Installation
 

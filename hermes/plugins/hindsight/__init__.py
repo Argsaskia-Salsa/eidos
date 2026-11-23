@@ -62,6 +62,7 @@ from .settings import (
     _parse_int_setting,
     _resolve_bank_id_template,
 )
+from .templates import apply_template, fetch_hermes_templates, fetch_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +292,69 @@ REFLECT_SCHEMA = {
     },
 }
 
+APPLY_TEMPLATE_SCHEMA = {
+    "name": "hindsight_apply_template",
+    "description": (
+        "Apply a starter memory template to the current bank. Fetches the "
+        "Hermes-tagged template catalog and applies the selected template via "
+        "the bank import endpoint. Useful for initializing a new bank with "
+        "pre-configured mental models and directives."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "template_id": {
+                "type": "string",
+                "description": "Optional specific template ID to apply (skips interactive selection).",
+            },
+            "list_only": {
+                "type": "boolean",
+                "description": "If true, only list available templates without applying.",
+                "default": False,
+            },
+        },
+    },
+}
+
+
+_KNOWN_CONFIG_KEYS = {
+    "mode", "api_key", "apiKey", "api_url", "apiUrl", "llm_provider", "llm_base_url", "llm_model", "llm_api_key",
+    "bank_id", "bank_id_template", "bank_mission", "bank_retain_mission", "recall_budget", "budget",
+    "memory_mode", "recall_prefetch_method", "prefetch_method", "retain_tags", "observation_scopes",
+    "retain_source", "retain_user_prefix", "retain_assistant_prefix", "recall_tags", "recall_tags_match",
+    "recall_types", "auto_recall", "recall_sync", "recall_indicator", "retain_indicator", "auto_retain",
+    "retain_every_n_turns", "retain_async", "prefetch_waits_for_retain", "prefetch_retain_drain_timeout",
+    "retain_context", "recall_max_tokens", "recall_max_input_chars", "recall_prompt_preamble",
+    "timeout", "idle_timeout", "port_health_grace_timeout", "profile", "banks",
+}
+
+
+def _validate_config(cfg: dict, source: str) -> dict:
+    """Validate config dict, warn on unknown keys, and ensure required fields have valid defaults."""
+    if not isinstance(cfg, dict):
+        logger.warning("Hindsight config from %s is not a dict, using defaults", source)
+        return {}
+    unknown = set(cfg.keys()) - _KNOWN_CONFIG_KEYS
+    if unknown:
+        logger.warning("Hindsight config from %s contains unknown keys: %s", source, sorted(unknown))
+    mode = cfg.get("mode", "cloud")
+    if mode not in ("cloud", "local_embedded", "local_external", "local"):
+        logger.warning("Hindsight config from %s has invalid mode %r, defaulting to 'cloud'", source, mode)
+        cfg["mode"] = "cloud"
+    budget = cfg.get("recall_budget") or cfg.get("budget", "mid")
+    if budget not in _VALID_BUDGETS:
+        logger.warning("Hindsight config from %s has invalid budget %r, defaulting to 'mid'", source, budget)
+        cfg["recall_budget"] = "mid"
+    memory_mode = cfg.get("memory_mode", "hybrid")
+    if memory_mode not in _SYSTEM_PROMPT_TAILS:
+        logger.warning("Hindsight config from %s has invalid memory_mode %r, defaulting to 'hybrid'", source, memory_mode)
+        cfg["memory_mode"] = "hybrid"
+    prefetch_method = cfg.get("recall_prefetch_method") or cfg.get("prefetch_method", "recall")
+    if prefetch_method not in {"recall", "reflect"}:
+        logger.warning("Hindsight config from %s has invalid prefetch_method %r, defaulting to 'recall'", source, prefetch_method)
+        cfg["recall_prefetch_method"] = "recall"
+    return cfg
+
 
 def _load_config() -> dict:
     """$HERMES_HOME/hindsight/config.json (profile-scoped), else ~/.hindsight/config.json
@@ -298,7 +362,7 @@ def _load_config() -> dict:
     for path in (get_hermes_home() / "hindsight" / "config.json", Path.home() / ".hindsight" / "config.json"):
         # A corrupt (or empty) file falls through to the next source, as before the dedup.
         if path.exists() and (data := read_json_or_empty(path)):
-            return data
+            return _validate_config(data, str(path))
     # Mode, bank (the data partition), endpoint and retain shaping are per-profile .env values like
     # the key beside them: read through the secret scope so a multiplexed secondary never inherits
     # the default profile's bank/mode. Tuning knobs (timeouts, budget) stay process-global.
@@ -465,6 +529,85 @@ class HindsightMemoryProvider(MemoryProvider):
             return ""
         available, reason = _check_local_runtime()
         return "" if available else _local_runtime_hint(reason).strip()
+
+    def health_check(self) -> dict:
+        """Ping the Hindsight API/daemon and return structured health status.
+
+        Returns a dict with keys:
+        - status: "healthy", "degraded", or "unhealthy"
+        - mode: current connection mode
+        - api_url: the API URL being used
+        - bank_id: the current bank ID
+        - latency_ms: response time in milliseconds (if successful)
+        - error: error message (if unhealthy)
+        - details: additional diagnostic information
+        """
+        import time
+
+        start = time.monotonic()
+        status = "unhealthy"
+        error = None
+        latency_ms = None
+        details = {}
+
+        try:
+            if self._mode == "local_embedded":
+                # For local_embedded, check if the runtime is available and daemon is running
+                available, reason = _check_local_runtime()
+                if not available:
+                    error = f"Local runtime unavailable: {reason}"
+                    details["runtime_available"] = False
+                    details["runtime_reason"] = reason
+                else:
+                    details["runtime_available"] = True
+                    # Try to get client and check daemon health
+                    try:
+                        client = self._get_client()
+                        # The embedded client has a _manager with is_running method
+                        profile = self._config.get("profile", "hermes") if self._config else "hermes"
+                        if hasattr(client, "_manager") and hasattr(client._manager, "is_running"):
+                            daemon_running = client._manager.is_running(profile)
+                            details["daemon_running"] = daemon_running
+                            if not daemon_running:
+                                error = "Embedded daemon is not running"
+                                status = "degraded"
+                            else:
+                                status = "healthy"
+                        else:
+                            status = "healthy"  # Runtime available, daemon status unknown
+                    except Exception as e:
+                        error = f"Failed to check embedded daemon: {e}"
+                        status = "degraded"
+                        details["daemon_check_error"] = str(e)
+            else:
+                # For cloud/local_external, ping the /version endpoint
+                api_url = self._api_url or (_DEFAULT_LOCAL_URL if self._mode == "local_external" else _DEFAULT_API_URL)
+                api_key = self._api_key
+                version = _fetch_hindsight_api_version(api_url, api_key, timeout=5.0)
+                latency_ms = int((time.monotonic() - start) * 1000)
+                details["api_url"] = api_url
+                details["api_version"] = version
+                if version:
+                    status = "healthy"
+                else:
+                    error = "API /version endpoint unreachable or returned no version"
+                    status = "degraded"
+        except Exception as e:
+            error = f"Health check failed: {e}"
+            details["exception"] = str(e)
+
+        if latency_ms is None:
+            latency_ms = int((time.monotonic() - start) * 1000)
+
+        return {
+            "status": status,
+            "mode": self._mode,
+            "api_url": self._api_url or (_DEFAULT_LOCAL_URL if self._mode == "local_external" else _DEFAULT_API_URL),
+            "bank_id": self._bank_id,
+            "latency_ms": latency_ms,
+            "error": error,
+            "details": details,
+        }
 
     def save_config(self, values, hermes_home):
         """Merge *values* into $HERMES_HOME/hindsight/config.json."""
@@ -745,16 +888,38 @@ class HindsightMemoryProvider(MemoryProvider):
         """Schedule *coro* on the shared loop using the configured timeout."""
         return _run_sync(coro, timeout=self._timeout)
 
-    def _run_hindsight_operation(self, operation):
-        """Run an async client operation; for local_embedded, a stale-daemon
+    def _run_hindsight_operation(self, operation, operation_name: str = "operation"):
+        """Run an async client operation with timing; for local_embedded, a stale-daemon
         connection failure recreates the client and retries once."""
+        start = time.monotonic()
         try:
-            return self._run_sync(operation(self._get_client()))
+            result = self._run_sync(operation(self._get_client()))
+            latency_ms = int((time.monotonic() - start) * 1000)
+            logger.debug(
+                "Hindsight %s completed (bank=%s, mode=%s, latency_ms=%d)",
+                operation_name,
+                self._bank_id,
+                self._mode,
+                latency_ms,
+            )
+            return result
         except Exception as exc:
+            latency_ms = int((time.monotonic() - start) * 1000)
             text = f"{type(exc).__name__}: {exc}".lower()
             if self._mode != "local_embedded" or not any(m in text for m in _RETRIABLE_CONNECTION_MARKERS):
+                logger.warning(
+                    "Hindsight %s failed (bank=%s, mode=%s, latency_ms=%d): %s",
+                    operation_name,
+                    self._bank_id,
+                    self._mode,
+                    latency_ms,
+                    exc,
+                )
                 raise
-            logger.info("Hindsight embedded daemon appears unreachable; recreating client and retrying once: %s", exc)
+            logger.info(
+                "Hindsight embedded daemon appears unreachable; recreating client and retrying once: %s",
+                exc,
+            )
             self._client = None
             self._client = client = self._get_client()
             return self._run_sync(operation(client))
@@ -1192,12 +1357,15 @@ class HindsightMemoryProvider(MemoryProvider):
             kwargs.update(tags=self._recall_tags, tags_match=self._recall_tags_match)
         if self._recall_types:
             kwargs["types"] = self._recall_types
-        resp = self._run_hindsight_operation(lambda client: client.arecall(**kwargs))
+        resp = self._run_hindsight_operation(
+            lambda client: client.arecall(**kwargs), operation_name="recall"
+        )
         return resp.results or []
 
     def _reflect(self, query: str) -> str | None:
         resp = self._run_hindsight_operation(
-            lambda client: client.areflect(bank_id=self._bank_id, query=query, budget=self._budget)
+            lambda client: client.areflect(bank_id=self._bank_id, query=query, budget=self._budget),
+            operation_name="reflect",
         )
         return resp.text
 
@@ -1360,7 +1528,9 @@ class HindsightMemoryProvider(MemoryProvider):
             "retain_async": retain_async,
         }
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
-        return self._run_hindsight_operation(lambda client: client.aretain_batch(**kwargs))
+        return self._run_hindsight_operation(
+            lambda client: client.aretain_batch(**kwargs), operation_name="retain"
+        )
 
     def _make_turn_retain_job(
         self, turns: list[str], *, document_id: str, update_mode: str | None, label: str, track_ops: bool = True
@@ -1472,7 +1642,13 @@ class HindsightMemoryProvider(MemoryProvider):
     # -- tools -------------------------------------------------------------------
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
-        return [] if self._memory_mode == "context" else [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
+        if self._memory_mode == "context":
+            return []
+        schemas = [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
+        # hindsight_apply_template is available when API is reachable (cloud/local_external)
+        if self._mode in ("cloud", "local_external"):
+            schemas.append(APPLY_TEMPLATE_SCHEMA)
+        return schemas
 
     def _tool_retain(self, args: dict) -> str:
         content, context = args["content"], args.get("context")
@@ -1515,11 +1691,56 @@ class HindsightMemoryProvider(MemoryProvider):
         logger.debug("Tool hindsight_reflect: response_len=%d", len(text))
         return text or "No relevant memories found."
 
+    def _tool_apply_template(self, args: dict) -> str:
+        template_id = args.get("template_id")
+        list_only = args.get("list_only", False)
+
+        if self._mode not in ("cloud", "local_external"):
+            return "Template application is only available in cloud or local_external mode (API must be reachable)."
+
+        if list_only or template_id is None:
+            try:
+                entries = fetch_hermes_templates(self._config)
+            except Exception as e:
+                logger.warning("Failed to fetch templates: %s", e)
+                return f"Failed to fetch template catalog: {e}"
+
+            if not entries:
+                return "No Hermes-tagged templates found in catalog."
+
+            if list_only:
+                lines = ["Available templates:"]
+                for e in entries:
+                    lines.append(f"  - {e['id']}: {e.get('name', e['id'])} — {e.get('description', '')[:80]}")
+                return "\n".join(lines)
+
+            return "Use 'template_id' parameter to apply a specific template, or 'list_only: true' to list available templates."
+
+        try:
+            entries = fetch_hermes_templates(self._config)
+        except Exception as e:
+            logger.warning("Failed to fetch templates: %s", e)
+            return f"Failed to fetch template catalog: {e}"
+
+        entry = next((e for e in entries if e["id"] == template_id), None)
+        if not entry:
+            return f"Template '{template_id}' not found in catalog."
+
+        try:
+            manifest = fetch_manifest(entry, self._config)
+            apply_template(self._api_url, self._bank_id, self._api_key, manifest)
+            logger.info("Applied template %s to bank %s", template_id, self._bank_id)
+            return f"Successfully applied template '{entry.get('name', template_id)}' to bank '{self._bank_id}'."
+        except Exception as e:
+            logger.warning("Failed to apply template %s: %s", template_id, e)
+            return f"Failed to apply template: {e}"
+
     # tool name -> (required arg, handler, user-facing failure prefix)
     _TOOL_HANDLERS = {
         "hindsight_retain": ("content", _tool_retain, "Failed to store memory"),
         "hindsight_recall": ("query", _tool_recall, "Failed to search memory"),
         "hindsight_reflect": ("query", _tool_reflect, "Failed to reflect"),
+        "hindsight_apply_template": (None, _tool_apply_template, "Failed to apply template"),
     }
 
     def handle_tool_call(self, tool_name: str, args: dict, **kwargs) -> str:

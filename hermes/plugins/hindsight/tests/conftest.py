@@ -115,6 +115,7 @@ def _install_hermes_stubs(hermes_home: Path) -> None:
     module("tools.registry", tool_error=lambda msg: f"ERROR: {msg}")
     module("tools.lazy_deps", install_specs=lambda *a, **k: None)
     module("utils", read_json_or_empty=_read_json_or_empty, atomic_json_write=_atomic_json_write)
+    module("hermes_cli.urllib_security", open_credentialed_url=lambda req, timeout: __import__("urllib.request").request.urlopen(req, timeout=timeout))
     # plugins.memory.config_schema stays Hermes-owned (the desktop panel needs core's type).
     module("plugins")
     module("plugins.memory", _get_active_memory_provider=lambda: "hindsight")
@@ -158,6 +159,7 @@ _spec.loader.exec_module(plugin)
 class FakeResult:
     def __init__(self, text: str):
         self.text = text
+        self.occurred_start = "2026-01-15T10:30:00+00:00"
 
 
 class FakeRecallResponse:

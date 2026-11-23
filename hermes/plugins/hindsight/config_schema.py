@@ -21,6 +21,7 @@ CONFIG_SCHEMA = ProviderConfigSchema(
             description="How Hermes connects to Hindsight.",
             options=(
                 ProviderFieldOption("cloud", "Cloud", "Hindsight Cloud API (lightweight, just needs an API key)"),
+                ProviderFieldOption("local_embedded", "Local Embedded", "Run Hindsight locally (downloads ~200MB, needs LLM key)"),
                 ProviderFieldOption("local_external", "Local External", "Connect to an existing Hindsight instance"),
             ),
             inline=True,

@@ -1,7 +1,8 @@
 """Starter bank templates for the Hindsight setup wizard: fetch the Bank Templates
 catalog, filter to the ``hermes`` integration, apply a manifest via
 ``POST /v1/default/banks/{bank}/import`` (creates the bank if missing).
-Catalog source overridable with ``HINDSIGHT_TEMPLATES_URL`` (pin/mirror).
+Catalog source overridable with ``HINDSIGHT_TEMPLATES_URL`` env var or
+``templates_url`` config key (pin/mirror).
 """
 
 from __future__ import annotations
@@ -30,7 +31,10 @@ def supported_for_mode(mode: str) -> bool:
     return mode in SUPPORTED_MODES
 
 
-def catalog_url() -> str:
+def catalog_url(config: dict | None = None) -> str:
+    """Return the catalog URL from config, env var, or default."""
+    if config and config.get("templates_url"):
+        return config["templates_url"]
     return os.environ.get("HINDSIGHT_TEMPLATES_URL", _DEFAULT_CATALOG_URL)
 
 
@@ -40,17 +44,17 @@ def _get_json(url: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def fetch_hermes_templates(url: str | None = None) -> list[dict]:
+def fetch_hermes_templates(config: dict | None = None, url: str | None = None) -> list[dict]:
     """Return catalog entries tagged for the ``hermes`` integration."""
-    catalog = _get_json(url or catalog_url())
+    catalog = _get_json(url or catalog_url(config))
     entries = catalog.get("templates", []) if isinstance(catalog, dict) else []
     return [e for e in entries if "hermes" in (e.get("integrations") or [])]
 
 
-def fetch_manifest(entry: dict, url: str | None = None) -> dict:
+def fetch_manifest(entry: dict, config: dict | None = None, url: str | None = None) -> dict:
     """Fetch the BankTemplateManifest JSON for a catalog entry (``manifest_file`` is
     relative to the catalog, e.g. "templates/foo.json")."""
-    return _get_json(urljoin(url or catalog_url(), entry["manifest_file"]))
+    return _get_json(urljoin(url or catalog_url(config), entry["manifest_file"]))
 
 
 def _bank_request(api_url: str, bank_id: str, api_key: str | None, action: str, *, headers: dict, **kwargs):
@@ -89,12 +93,14 @@ def probe_existing_customization(api_url: str, bank_id: str, api_key: str | None
     return bool(data.get("bank") or data.get("mental_models") or data.get("directives"))
 
 
-def run_template_step(*, api_url: str, bank_id: str, api_key: str | None, select, cancelled, log=print) -> str | None:
+def run_template_step(
+    *, api_url: str, bank_id: str, api_key: str | None, config: dict | None = None, select, cancelled, log=print
+) -> str | None:
     """Wizard starter-template step. ``select(title, items, default, cancel_returns)``
     is the picker (injected: testable without curses). Returns the applied template
     id, or None if skipped/blank/failed. Never raises — a template is a nice-to-have."""
     try:
-        entries = fetch_hermes_templates()
+        entries = fetch_hermes_templates(config)
     except Exception as e:  # network/parse — non-fatal
         logger.debug("Hindsight: could not fetch templates: %s", e)
         return None
@@ -126,7 +132,7 @@ def run_template_step(*, api_url: str, bank_id: str, api_key: str | None, select
             return None
 
     try:
-        manifest = fetch_manifest(entry)
+        manifest = fetch_manifest(entry, config)
         apply_template(api_url, bank_id, api_key, manifest)
         log(f"  ✓ Applied '{entry.get('name', entry['id'])}' template to bank '{bank_id}'")
         return entry["id"]

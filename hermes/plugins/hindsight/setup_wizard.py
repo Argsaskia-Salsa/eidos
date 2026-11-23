@@ -174,6 +174,7 @@ def run_setup(provider, hermes_home: str, config: dict) -> None:
             api_url=provider_config.get("api_url") or default_url,
             bank_id=provider_config.get("bank_id", "hermes"),
             api_key=env_writes.get("HINDSIGHT_API_KEY") or os.environ.get("HINDSIGHT_API_KEY", "") or None,
+            config=provider_config,
             select=_curses_select,
             cancelled=_CANCELLED,
         )

@@ -60,7 +60,7 @@ def test_recall_tool_queries_the_bank_and_formats_results(provider):
     assert fake.recalls[0]["bank_id"] == "team"
     assert fake.recalls[0]["budget"] == "high"
     assert fake.recalls[0]["types"] == ["observation"]  # observation-only default
-    assert result["result"] == "1. fact one\n2. fact two"
+    assert result["result"] == "[2026-01-15] fact one\n[2026-01-15] fact two"
     instance.shutdown()
 
 
@@ -91,7 +91,7 @@ def test_tool_call_errors_are_reported_not_raised(provider):
 def test_prefetch_injects_recalled_memories(provider):
     instance, fake = provider({"recall_sync": True}, client=FakeClient(recall_texts=["fact one"]))
     block = instance.prefetch("what do you know?")
-    assert "- fact one" in block
+    assert "[2026-01-15] fact one" in block
     status = instance.recall_status()
     assert status.count == 1 and status.provider_label == "Hindsight"
     instance.shutdown()
@@ -107,6 +107,7 @@ def test_context_mode_hides_tools_tools_mode_skips_recall(provider):
         "hindsight_retain",
         "hindsight_recall",
         "hindsight_reflect",
+        "hindsight_apply_template",
     ]
     assert tools_only.prefetch("anything") == ""
     assert fake.recalls == []
