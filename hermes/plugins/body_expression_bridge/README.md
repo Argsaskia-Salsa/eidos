@@ -1,37 +1,39 @@
 # body_expression_bridge
 
-Hermes plugin that forwards agent events to **reflexd** via MCP for real-time expressive-body reactions (animations, speech-gesture sync, attention cues).
+Hermes plugin that forwards agent dialogue lifecycle events to an **events endpoint** (HTTP POST) for real-time expressive-body reactions (animations, speech-gesture sync, attention cues).
 
 ## Overview
 
-The plugin bridges Hermes internal events to reflexd's Agent Channel by posting JSON-RPC calls to the reflexd MCP endpoint (`http://localhost:8770/mcp` by default). This enables reflexd to track and visualize the agent's thought process and communication flow in real time.
+The plugin bridges Hermes internal events to an external events endpoint by posting JSON payloads via HTTP POST (default: `http://localhost:8770/events`). This enables downstream consumers (e.g., reflexd) to track and visualize the agent's thought process and communication flow in real time.
 
 **Outbound only**: This plugin does NOT register tools, does NOT read sensors, and does NOT touch motor control. For the inbound L0/L1 path see the separate `body_sensor_bridge` plugin.
 
 ## Events Forwarded
 
-| Event | Trigger | Description |
-|-------|---------|-------------|
-| `user_message` | `post_gateway_admission` | Fired after authentication/admission, inside the session slot. Captures the validated user message. |
-| `user_response` | `post_llm_call` | Fired after LLM completes its turn, before response delivery. Captures the assistant's response. |
-| `thinking_start` | `llm_execution` middleware (pre) | Fired immediately before LLM generation begins. |
-| `thinking_end` | `llm_execution` middleware (post) | Fired immediately after LLM generation completes. |
-| `platform_event` | `gateway_platform_event` | Fired on platform events (Telegram reactions, edits, etc.). |
-| `stream_start` | `on_stream_start` | Fired when streaming generation begins. |
-| `stream_delta` | `on_stream_delta` | Fired for streaming text deltas (throttled by 80 chars or 100ms). |
-| `stream_end` | `on_stream_end` | Fired when streaming generation ends. |
-| `session_end` | `on_session_end` | Fired on per-turn session close. |
-| `session_finalize` | `on_session_finalize` | Fired on session boundary cleanup. |
-| `api_error` | `api_request_error` | Fired on LLM API failures. |
+| Event              | Trigger                           | Description                                                                                         |
+|--------------------|-----------------------------------|-----------------------------------------------------------------------------------------------------|
+| `user_message`     | `post_gateway_admission`          | Fired after authentication/admission, inside the session slot. Captures the validated user message. |
+| `user_response`    | `post_llm_call`                   | Fired after LLM completes its turn, before response delivery. Captures the assistant's response.    |
+| `thinking_start`   | `llm_execution` middleware (pre)  | Fired immediately before LLM generation begins.                                                     |
+| `thinking_end`     | `llm_execution` middleware (post) | Fired immediately after LLM generation completes.                                                   |
+| `platform_event`   | `gateway_platform_event`          | Fired on platform events (Telegram reactions, edits, etc.).                                         |
+| `stream_start`     | `on_stream_start`                 | Fired when streaming generation begins.                                                             |
+| `stream_delta`     | `on_stream_delta`                 | Fired for streaming text deltas (throttled by 80 chars or 100ms).                                   |
+| `stream_end`       | `on_stream_end`                   | Fired when streaming generation ends.                                                               |
+| `session_end`      | `on_session_end`                  | Fired on per-turn session close.                                                                    |
+| `session_finalize` | `on_session_finalize`             | Fired on session boundary cleanup.                                                                  |
+| `api_error`        | `api_request_error`               | Fired on LLM API failures.                                                                          |
 
 ## Architecture
 
 - **EventDispatcher class**: Encapsulates the worker loop and HTTP posting logic, providing a clean interface for scheduling events.
 - **Async worker thread**: A dedicated background thread runs its own `asyncio` event loop, ensuring thread-safe fire-and-forget HTTP posts from both sync (middleware) and async (hook) contexts.
 - **Platform filtering**: Events from `local`, `desktop`, or `cli` platforms are skipped to avoid noise from development/local sessions.
-- **Graceful degradation**: If reflexd is unavailable, events are dropped with a warning log; Hermes continues unaffected.
-- **Configuration via environment variables**: `REFLEXD_MCP_URL` and `REFLEXD_TIMEOUT_SECONDS` for flexible deployment.
-- **Comprehensive test suite**: 58 tests (37 unit + 21 integration) with 98% code coverage.
+- **Circuit breaker**: Automatic failure detection with configurable threshold and cooldown; drops events when open to prevent cascade failures.
+- **Bounded pending queue**: Limits in-flight requests; drops oldest when full with metrics logging.
+- **Graceful degradation**: If the events endpoint is unavailable, events are dropped with a warning log; Hermes continues unaffected.
+- **Configuration via environment variables**: Flexible deployment without code changes.
+- **Comprehensive test suite**: 178 tests across 5 test files covering unit, integration, hook, and publisher logic.
 
 ## Installation
 
@@ -112,56 +114,52 @@ Body Expression Bridge hooks/middleware registered: post_gateway_admission, post
 
 ## Configuration
 
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `REFLEXD_MCP_URL` | `http://localhost:8770/mcp` | reflexd MCP endpoint URL |
-| `REFLEXD_TIMEOUT_SECONDS` | `1.0` | HTTP request timeout in seconds |
+| Environment Variable       | Default                        | Description                         |
+|----------------------------|--------------------------------|-------------------------------------|
+| `EVENTS_ENDPOINT_URL`      | `http://localhost:8770/events` | Events endpoint URL (HTTP POST)     |
+| `EVENTS_TIMEOUT_SECONDS`   | `1.0`                          | HTTP request timeout in seconds     |
+| `EVENTS_MAX_PENDING`       | `256`                          | Maximum pending events in queue     |
+| `EVENTS_SKIP_PLATFORMS`    | `local,desktop,cli`            | Comma-separated platforms to skip   |
+| `EVENTS_BREAKER_THRESHOLD` | `5`                            | Circuit breaker failure threshold   |
+| `EVENTS_BREAKER_COOLDOWN`  | `10`                           | Circuit breaker cooldown in seconds |
 
 Example:
 
 ```bash
-export REFLEXD_MCP_URL=http://reflexd:8770/mcp
-export REFLEXD_TIMEOUT_SECONDS=2.0
+export EVENTS_ENDPOINT_URL=http://reflexd:8770/events
+export EVENTS_TIMEOUT_SECONDS=2.0
+export EVENTS_BREAKER_THRESHOLD=10
 hermes plugins enable body_expression_bridge
 ```
 
-Ensure reflexd is running with MCP enabled:
-
-```bash
-reflexd --mcp-port 8770
-```
+Ensure the events endpoint is running and accepts HTTP POST at the configured URL.
 
 ## Payload Format
 
-All events are sent via JSON-RPC `tools/call` to the `inject_event` tool:
+All events are sent as direct HTTP POST with JSON body:
 
 ```json
 {
-  "jsonrpc": "2.0",
-  "method": "tools/call",
-  "params": {
-    "name": "inject_event",
-    "arguments": {
-      "name": "user_message|user_response|thinking_start|thinking_end|platform_event|stream_start|stream_delta|stream_end|session_end|session_finalize|api_error",
-      "data": {
-        "text": "message content (empty for thinking/stream/session events)",
-        "platform": "telegram|discord|slack|...|stream",
-        "chat_id": "unique chat identifier (or session_id for stream events)",
-        "user_id": "unique user identifier (empty for stream events)",
-        "session_id": "session identifier (empty for stream events)",
-        "turn_id": "turn identifier (empty for stream events)",
-        "seq": 1,
-        "ts": 1700000000.123,
-        "v": 1,
-        "data": {
-          "event_type": "platform event type (for platform_event)",
-          "payload": "full platform event payload (for platform_event)"
-        }
-      },
-      "type": "inject"
+  "event_type": "user_message|user_response|thinking_start|thinking_end|platform_event|stream_start|stream_delta|stream_end|session_end|session_finalize|api_error",
+  "payload": {
+    "text": "message content (empty for thinking/stream/session events)",
+    "platform": "telegram|discord|slack|...|stream",
+    "chat_id": "unique chat identifier (or session_id for stream events)",
+    "user_id": "unique user identifier (empty for stream events)",
+    "turn_id": "turn identifier (empty for stream events)",
+    "seq": 1,
+    "ts": 1700000000.123,
+    "v": 1,
+    "data": {
+      "event_type": "platform event type (for platform_event)",
+      "payload": "full platform event payload (for platform_event)"
     }
   },
-  "id": 1
+  "meta": {
+    "seq": 2,
+    "ts": 1700000000.123,
+    "v": 1
+  }
 }
 ```
 
@@ -170,9 +168,8 @@ All events are sent via JSON-RPC `tools/call` to the `inject_event` tool:
 - `platform`: Source platform (telegram, discord, slack, etc. or "stream")
 - `chat_id`: Unique chat identifier (session_id for stream events)
 - `user_id`: Unique user identifier (empty for stream events)
-- `session_id`: Session identifier (empty for stream events)
 - `turn_id`: Turn identifier (empty for stream events)
-- `seq`: Monotonically increasing sequence number per plugin instance
+- `seq`: Monotonically increasing sequence number per plugin instance (separate counters for payload and meta)
 - `ts`: Unix timestamp (seconds since epoch, float)
 - `v`: Payload schema version (currently 1)
 - `data`: Optional nested data (used by `platform_event` for `event_type` and `payload`)
@@ -259,6 +256,15 @@ pytest tests/test_unit.py -v
 # Run integration tests only
 pytest tests/test_integration.py -v
 
+# Run hook tests
+pytest tests/test_hooks.py -v
+
+# Run hook integration tests
+pytest tests/test_hook_integration.py -v
+
+# Run publisher tests
+pytest tests/test_publisher.py -v
+
 # Coverage report
 pytest tests/ --cov=body_expression_bridge --cov-report=term-missing
 ```
@@ -277,13 +283,14 @@ ruff format .
 
 ```
 tests/
-├── test_unit.py            # 37 unit tests (isolated, fast)
-├── test_integration.py     # 21 integration tests (protocol, worker, e2e)
-├── test_hooks.py           # Hook-specific unit tests
-└── test_hook_integration.py # Hook integration tests
+├── test_unit.py               # Core unit tests (platform filtering, payload building, extraction, middleware, dispatcher lifecycle)
+├── test_integration.py        # Integration tests (protocol, worker, e2e hook flows)
+├── test_hooks.py              # Hook-specific unit tests (all 11 hooks)
+├── test_hook_integration.py   # Hook integration tests (end-to-end protocol verification)
+└── test_publisher.py          # Publisher architecture tests (EventDispatcher, _build_payload, circuit breaker, queue limits)
 ```
 
-Current coverage: **98%** (96% on main module)
+Current test count: **178 tests** across 5 test files.
 
 ## Requirements
 

@@ -10,31 +10,31 @@ Eidos is a modular platform for expressive robotic behaviors, combining natural 
 │   Discord       │     │   (Admission, LLM)   │     │  _bridge Plugin  │
 │   Slack...      │     │                      │     │  (Publisher)     │
 └─────────────────┘     └──────────────────────┘     └─────────┬────────┘
-                                                               │ HTTP POST /events
-                                                               ▼
+                                                                │ HTTP POST /events
+                                                                ▼
 ┌─────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
 │   LED Stream    │◀────│                      │     │                  │
-│   Pose Stream   │     │    reflexd           │◀────│  /events         │
-│   (WebSocket)   │     │  (Event Processor)   │     │  /events/stream  │
+│   (WS 8772)     │     │    reflexd           │◀────│  /events         │
+│   (HTTP 8773)   │     │  (Event Processor)   │     │  /events/stream  │
 └─────────────────┘     └──────────────────────┘     │  (WebSocket)     │
-                                                     └────────┬─────────┘
-                                                              │
-                                                              ▼
-                                                     ┌──────────────────┐
-                                                     │  Debug UI        │
-                                                     │  (Browser)       │
-                                                     └──────────────────┘
+                                                      └────────┬─────────┘
+                                                               │
+                                                               ▼
+                                                      ┌──────────────────┐
+                                                      │  Debug UI        │
+                                                      │  (Browser)       │
+                                                      └──────────────────┘
 ```
 
 ### Components
 
-| Component                  | Role                                         | Port |
-|----------------------------|----------------------------------------------|------|
-| **Hermes Gateway**         | Central message broker, LLM orchestration    | 8767 |
-| **body_expression_bridge** | Hermes plugin, publishes dialogue events     | —    |
-| **reflexd**                | Event processor, reflex executor, MCP server | 8770 |
-| **LED Stream**             | Real-time LED pattern streaming              | 8771 |
-| **Pose Stream**            | Real-time head/body pose streaming           | 8772 |
+| Component                  | Role                                         | Ports                           |
+|----------------------------|----------------------------------------------|---------------------------------|
+| **Hermes Gateway**         | Central message broker, LLM orchestration    | WS 8765, Capture 8766, MCP 8767 |
+| **body_expression_bridge** | Hermes plugin, publishes dialogue events     | —                               |
+| **reflexd**                | Event processor, reflex executor, MCP server | MCP 8770, Events HTTP 8770      |
+| **LED Stream**             | Real-time LED pattern streaming              | WS 8772, HTTP 8773              |
+| **Pose Stream**            | Real-time head/body pose streaming           | WS 8774, HTTP 8775              |
 
 ## Event Flow
 
@@ -84,9 +84,55 @@ EVENTS_BREAKER_COOLDOWN=10
 ```bash
 GATEWAY_MCP_URL=http://127.0.0.1:8767/mcp
 STACKCHAN_TOKEN=your-token
+
+# MCP server port (default 8770)
 REFLEXD_MCP_PORT=8770
+
+# Maximum concurrent WebSocket connections for /events/stream
 EVENTS_WS_MAX_CLIENTS=10
-REFLEXES_DIR=/path/to/reflexes
+
+# REFLEXES_DIR: Use absolute path (systemd expands %h to home dir)
+# In systemd: REFLEXES_DIR=%h/projects/eidos/services/reflexd/reflexes
+# For manual runs: REFLEXES_DIR=/home/youruser/projects/eidos/services/reflexd/reflexes
+REFLEXES_DIR=/home/youruser/projects/eidos/services/reflexd/reflexes
+```
+
+### LED Stream `.env`
+```bash
+WS_HOST=0.0.0.0
+WS_PORT=8772
+HTTP_PORT=8773
+DEFAULT_FPS=20
+DEFAULT_BRIGHTNESS=1.0
+NUM_LEDS=12
+COLOR_ORDER=grb
+GATEWAY_MCP_URL=http://127.0.0.1:8767/mcp
+STACKCHAN_TOKEN=your-token
+TARGET=base_ring
+MAX_FPS=20
+HOST_IP=127.0.0.1
+```
+
+### Pose Stream `.env`
+```bash
+WS_HOST=0.0.0.0
+WS_PORT=8774
+HTTP_PORT=8775
+DEFAULT_FPS=20
+GATEWAY_MCP_URL=http://127.0.0.1:8767/mcp
+STACKCHAN_TOKEN=your-token
+HOST_IP=127.0.0.1
+```
+
+### Hermes Gateway `.env`
+```bash
+STACKCHAN_TOKEN=your-token-here
+HOST=0.0.0.0
+WS_PORT=8765
+CAPTURE_PORT=8766
+MCP_HTTP_HOST=127.0.0.1
+MCP_HTTP_PORT=8767
+MCP_HTTP_ALLOWED_HOSTS=
 ```
 
 ## Debug UI — Real-Time Event Monitor
@@ -141,7 +187,7 @@ curl -X POST http://localhost:8770/events \
 
 ```bash
 # body_expression_bridge publisher tests
-cd .hermes/plugins/body_expression_bridge
+cd hermes/plugins/body_expression_bridge
 pip install -e ".[dev]"
 python -m pytest tests/test_publisher.py -v
 
