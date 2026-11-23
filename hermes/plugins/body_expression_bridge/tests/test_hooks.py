@@ -92,19 +92,16 @@ class TestGatewayPlatformEventHook:
 
     @pytest.mark.asyncio
     async def test_local_platform_filtered(self):
-        """Test local platforms are skipped - no HTTP call made."""
+        """Test local platforms are skipped - no worker loop created."""
         payload = {"chat_id": "chat-1", "user_id": "user-1"}
-        # Patch the HTTP post method to verify it's not called
-        with (
-            patch.object(bb._dispatcher, "_post_to_reflexd") as mock_post,
-            patch.object(bb._dispatcher, "_ensure_worker", return_value=MagicMock()),
-        ):
+        # Patch the ensure_worker to verify it's not called for local platforms
+        with patch.object(bb._dispatcher, "_ensure_worker") as mock_ensure:
             await bb._gateway_platform_event_hook(
                 platform="local",
                 event_type="reaction",
                 payload=payload,
             )
-            mock_post.assert_not_called()
+            mock_ensure.assert_not_called()
 
 
 class TestStreamHooks:
@@ -468,11 +465,8 @@ class TestSessionEndHook:
 
     @pytest.mark.asyncio
     async def test_local_platform_filtered(self):
-        """Test local platform is skipped - no HTTP call made."""
-        with (
-            patch.object(bb._dispatcher, "_post_to_reflexd") as mock_post,
-            patch.object(bb._dispatcher, "_ensure_worker", return_value=MagicMock()),
-        ):
+        """Test local platform is skipped - no worker loop created."""
+        with patch.object(bb._dispatcher, "_ensure_worker") as mock_ensure:
             await bb._on_session_end_hook(
                 session_id="sess-3",
                 completed=True,
@@ -484,7 +478,7 @@ class TestSessionEndHook:
                 turn_id="turn-3",
                 api_request_id="api-3",
             )
-            mock_post.assert_not_called()
+            mock_ensure.assert_not_called()
 
 
 class TestSessionFinalizeHook:
@@ -530,17 +524,14 @@ class TestSessionFinalizeHook:
 
     @pytest.mark.asyncio
     async def test_local_platform_filtered(self):
-        """Test local platform is skipped - no HTTP call made."""
-        with (
-            patch.object(bb._dispatcher, "_post_to_reflexd") as mock_post,
-            patch.object(bb._dispatcher, "_ensure_worker", return_value=MagicMock()),
-        ):
+        """Test local platform is skipped - no worker loop created."""
+        with patch.object(bb._dispatcher, "_ensure_worker") as mock_ensure:
             await bb._on_session_finalize_hook(
                 session_id="sess-4",
                 platform="cli",
                 reason="new_session",
             )
-            mock_post.assert_not_called()
+            mock_ensure.assert_not_called()
 
 
 class TestApiRequestErrorHook:

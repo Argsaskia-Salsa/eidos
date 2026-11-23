@@ -12,6 +12,10 @@ dependencies = [
 [tool.uv]
 package = false
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["body_expression_bridge*"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
