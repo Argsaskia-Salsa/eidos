@@ -187,13 +187,75 @@ class GatewayClient:
             async with session.post(self.url, json=request, headers=headers) as resp:
                 if resp.status != 200:
                     text = await resp.text()
+                    # Check for session expiry - reinitialize and retry once
+                    if resp.status == 404 and "Session not found" in text:
+                        logger.warning("Session expired, reinitializing...")
+                        await self._reinitialize()
+                        # Update session_id after reinit
+                        new_session_id = self.session_id
+                        headers["Mcp-Session-Id"] = new_session_id
+                        # Retry once
+                        async with session.post(self.url, json=request, headers=headers) as retry_resp:
+                            if retry_resp.status != 200:
+                                retry_text = await retry_resp.text()
+                                raise RuntimeError(f"Tool call failed after reinit: {retry_resp.status} - {retry_text}")
+                            retry_data = await retry_resp.json()
+                            if "error" in retry_data:
+                                raise RuntimeError(f"Tool error: {retry_data['error']}")
+                            return retry_data.get("result", {})
                     raise RuntimeError(f"Tool call failed: {resp.status} - {text}")
                 data = await resp.json()
                 if "error" in data:
+                    # Check for session expiry in error response
+                    error_msg = str(data['error'])
+                    if "Session not found" in error_msg:
+                        logger.warning("Session expired (in error), reinitializing...")
+                        await self._reinitialize()
+                        new_session_id = self.session_id
+                        headers["Mcp-Session-Id"] = new_session_id
+                        async with session.post(self.url, json=request, headers=headers) as retry_resp:
+                            if retry_resp.status != 200:
+                                retry_text = await retry_resp.text()
+                                raise RuntimeError(f"Tool call failed after reinit: {retry_resp.status} - {retry_text}")
+                            retry_data = await retry_resp.json()
+                            if "error" in retry_data:
+                                raise RuntimeError(f"Tool error: {retry_data['error']}")
+                            return retry_data.get("result", {})
                     raise RuntimeError(f"Tool error: {data['error']}")
                 return data.get("result", {})
 
         return await breaker.call(_do_call)
+
+    async def _reinitialize(self) -> None:
+        """Reinitialize MCP session after expiry."""
+        if not self.session:
+            raise RuntimeError("No session to reinitialize")
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": str(uuid.uuid4()),
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "reflexd", "version": "0.1.0"},
+            },
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "Authorization": f"Bearer {self.token}",
+        }
+
+        async with self.session.post(self.url, json=request, headers=headers) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Reinitialize failed: {resp.status}")
+            new_session_id = resp.headers.get("Mcp-Session-Id")
+            if not new_session_id:
+                raise RuntimeError("No Mcp-Session-Id in reinitialize response")
+            self.session_id = new_session_id
+            logger.info("Reinitialized gateway session: %s", new_session_id)
 
     async def close(self) -> None:
         if self.session:
