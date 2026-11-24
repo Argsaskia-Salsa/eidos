@@ -33,3 +33,30 @@ dev = ["pytest>=8.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+ignore = [
+    "BLE001",  # Broad exception catches are intentional for robustness (health checks, daemon startup)
+    "PLW0127",  # Self-assignment is intentional for test patching (re-exported module vars)
+    "F401",  # Unused imports are re-exported for test patching
+    "RUF100",  # noqa directives for S310 are intentional for security audit
+    "S110",  # try-except-pass is intentional for optional dependency handling
+    "FURB162",  # timezone replacement is intentional for compatibility
+    "SIM115",  # File opening without context manager is intentional for long-lived file handles
+    "UP017",  # datetime.UTC alias not available in all Python versions
+    "UP035",  # Callable from typing is used for compatibility
+    "C408",  # dict() call is intentional for readability
+    "PIE807",  # Lambda over list/dict is intentional for lazy evaluation
+    "RUF059",  # Unused variable in test is intentional for API consistency
+]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C4",  # flake8-comprehensions
+    "PIE", # flake8-pie
+    "RUF", # ruff-specific rules
+]

@@ -9,7 +9,6 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-
 from hindsight_hermes import embedded
 
 

@@ -12,7 +12,7 @@ import importlib.util
 import sys
 import types
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -110,7 +110,7 @@ def _install_hermes_stubs(hermes_home: Path) -> None:
         _prompt=lambda *a, **k: "",
     )
     module("hermes_constants", get_hermes_home=lambda: hermes_home)
-    module("hermes_time", now=lambda: datetime.now(timezone.utc))
+    module("hermes_time", now=lambda: datetime.now(UTC))
     module("tools")
     module("tools.registry", tool_error=lambda msg: f"ERROR: {msg}")
     module("tools.lazy_deps", install_specs=lambda *a, **k: None)
@@ -136,6 +136,7 @@ def hermes_env(tmp_path, monkeypatch):
     SECRETS.clear()
     # The plugin binds `get_hermes_home` at import time, so patch it where it is used.
     monkeypatch.setattr(sys.modules["hindsight_hermes"], "get_hermes_home", lambda: tmp_path)
+    monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
     for var in list(__import__("os").environ):
         if var.startswith("HINDSIGHT_"):

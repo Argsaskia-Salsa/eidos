@@ -18,7 +18,11 @@ except ImportError:
     masked_secret_prompt = lambda *args, **kwargs: ""
 
 from . import templates as _hs_templates
-from .embedded import _embedded_profile_env_path, _load_simple_env, _materialize_embedded_profile_env
+from .embedded import (
+    _embedded_profile_env_path,
+    _load_simple_env,
+    _materialize_embedded_profile_env,
+)
 from .settings import (
     _DEFAULT_API_URL,
     _DEFAULT_IDLE_TIMEOUT,
@@ -45,7 +49,11 @@ def _secret_prompt(label: str) -> str:
 
 def _select(title: str, items: list, values: list, current) -> str | None:
     """Curses pick from *values*, defaulting to *current*; None when cancelled."""
-    from hermes_cli.memory_setup import _CANCELLED, _curses_select, _print_cancelled_setup
+    from hermes_cli.memory_setup import (
+        _CANCELLED,
+        _curses_select,
+        _print_cancelled_setup,
+    )
 
     default = values.index(current) if current in values else 0
     idx = _curses_select(title, items, default=default, cancel_returns=_CANCELLED)
