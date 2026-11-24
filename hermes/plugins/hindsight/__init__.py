@@ -38,6 +38,8 @@ from .settings import (
     _VALID_BUDGETS,
     _check_api_supports_update_mode_append,
     _mint_document_id,
+    _cloud_api_key,
+    _load_config,
 )
 from .templates import apply_template, fetch_hermes_templates, fetch_manifest
 from .tools import ToolHandler

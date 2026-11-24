@@ -108,14 +108,20 @@ class HealthChecker:
             mode = cfg.get("mode", "cloud")
             if mode in _LOCAL_MODES:
                 from .embedded import _ensure_local_runtime
+
                 return _ensure_local_runtime()[0]
-            return mode == "local_external" or bool(_cloud_api_key(cfg) or cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", ""))
-        except Exception:
+            result = mode == "local_external" or bool(
+                _cloud_api_key(cfg) or cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "")
+            )
+            return result
+        except Exception as e:
+            logger.warning(f"Hindsight health check failed: {e}")
             return False
 
     def unavailable_reason(self) -> str:
         try:
             from . import _LOCAL_MODES, _load_config
+
             cfg = _load_config()
             if cfg.get("mode", "cloud") not in _LOCAL_MODES:
                 return ""
