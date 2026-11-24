@@ -4,6 +4,9 @@ Long-term memory with knowledge graph, entity resolution, and multi-strategy ret
 
 A [Hermes Agent](https://github.com/NousResearch/hermes-agent) memory-provider plugin. It used to ship inside Hermes as `plugins/memory/hindsight/`; Nous Research moved every memory provider out of the core tree and handed this one over, so it now lives here and is maintained by the Hindsight team. This directory is the live source, and the Hermes catalog entry points here.
 
+**Upstream:** [vectorize-io/hindsight/tree/main/hindsight-integrations/hermes](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/hermes)  
+**License:** [MIT](LICENSE) — Copyright (c) 2025 Vectorize AI, Inc.
+
 ## Install
 
 ```bash
@@ -293,4 +296,6 @@ uv run ruff format .
 
 ## License
 
-MIT — maintained by the Hindsight team (originally Nous Research).
+[MIT License](LICENSE) — Copyright (c) 2025 Vectorize AI, Inc.
+
+Maintained by the Hindsight team (originally Nous Research).
