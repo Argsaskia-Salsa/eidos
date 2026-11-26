@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -31,6 +31,6 @@ class Event:
     event_type: EventType
     payload: dict[str, Any]
     meta: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     correlation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     source_service: str = ""
